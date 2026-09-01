@@ -1,6 +1,7 @@
-# Logs
-logs
+# Logs (runtime only — test fixtures under tests/fixtures/logs are kept)
+/logs
 *.log
+!tests/fixtures/logs/*.log
 npm-debug.log*
 
 node_modules

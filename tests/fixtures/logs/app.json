@@ -1,0 +1,12 @@
+{"ts":"2026-09-01T08:00:01.000Z","level":"INFO","service":"api","msg":"Server started on :8080"}
+{"ts":"2026-09-01T08:00:01.123Z","level":"DEBUG","service":"api","msg":"Loaded 42 config keys"}
+{"ts":"2026-09-01T08:00:02.456Z","level":"WARN","service":"db","msg":"Pool at 90% (9/10)"}
+{"ts":"2026-09-01T08:00:03.789Z","level":"INFO","service":"api","msg":"GET /healthz 200 in 3ms"}
+{"ts":"2026-09-01T08:00:05.012Z","level":"ERROR","service":"cache","msg":"Connection refused redis:6379"}
+{"ts":"2026-09-01T08:00:06.345Z","level":"WARN","service":"cache","msg":"Falling back to in-memory cache"}
+{"ts":"2026-09-01T08:00:07.678Z","level":"INFO","service":"api","msg":"POST /api/orders 201 in 42ms"}
+{"ts":"2026-09-01T08:00:09.901Z","level":"DEBUG","service":"db","msg":"Slow query 1240ms: SELECT * FROM orders"}
+{"ts":"2026-09-01T08:00:11.234Z","level":"ERROR","service":"api","msg":"500 on /api/orders/55213 — NullPointerException"}
+{"ts":"2026-09-01T08:00:12.567Z","level":"FATAL","service":"worker","msg":"Worker 3 OOM, respawning"}
+{"ts":"2026-09-01T08:00:13.890Z","level":"INFO","service":"worker","msg":"Worker 3 back online"}
+{"ts":"2026-09-01T08:00:15.123Z","level":"INFO","service":"api","msg":"Shutdown initiated (SIGTERM)"}

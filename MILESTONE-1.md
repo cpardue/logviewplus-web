@@ -56,11 +56,30 @@ zip/clipboard, tail, persistence, export. (Placeholder stubs only where cheap.)
 
 ## Acceptance criteria (Definition of Done)
 
-- [ ] `npm test` green (unit), `npm run test:e2e` green (Chromium headless)
+- [x] `npm test` green (unit), `npm run test:e2e` green (Chromium headless)
 - [ ] CI green on push to `main`; site live at `https://<user>.github.io/logviewplus-web/`
-- [ ] 10 MB and 100 MB generated fixtures meet perf gate; numbers recorded
-- [ ] README updated: usage instructions + perf table + known limitations
-- [ ] History file entry written (milestone complete)
+- [x] 10 MB and 100 MB generated fixtures meet perf gate; numbers recorded (`tests/perf.md`)
+- [x] README updated: usage instructions + perf table + known limitations
+- [x] History file entry written (milestone complete)
+
+## Deviations from plan (as-built notes)
+
+- Initial specifier set shipped: `%d`, `%l`, `%t`, `%m` (the `%S`/`%s` advanced
+  date variants are M2). Level normalization covers text aliases
+  (WARNING/SEVERE/FINEST/…); numeric level mapping deferred to M2.
+- `parseLine` never returns null: unmatched lines are kept as raw entries
+  (`ts`/`level` null) so no data is silently lost.
+- Chunking + streaming UTF-8 decode run on the main thread
+  (`src/lib/fileSource.ts`, 1 MiB slices); the worker owns a pure `ParseEngine`
+  (`src/workers/parser-engine.ts`) that is directly unit-testable in Node.
+  Batches ~5k rows; plain structured clone (transferables deferred).
+- AG Grid receives row data **once per completed file** (not per streamed
+  batch): per-batch full re-diffs were O(n²) and dominated the 100 MB case —
+  see `tests/perf.md`.
+- AG Grid v32 modular API: `GridCoreModule` + `CommunityFeaturesModule` +
+  `ClientSideRowModelModule`; `gridApi.getModel()` is deprecated, so E2E
+  asserts on app-exposed counts (`window.__appCounts`) plus a
+  `getDisplayedRowCount()` paint sanity check.
 
 ## Next after M1
 
