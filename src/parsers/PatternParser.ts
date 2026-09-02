@@ -1,7 +1,7 @@
 import { compilePattern } from './specifiers'
 import { normalizeLevel } from './levels'
 import { parseTimestamp } from './timestamps'
-import type { LogEntry } from './types'
+import type { DraftEntry, LogEntry, LogParser } from './types'
 
 export const DEFAULT_TEMPLATE = '%d %l: %m'
 
@@ -17,7 +17,8 @@ export interface PatternParserOptions {
  * Lines that do not match still produce an entry (message = raw line, ts/level null)
  * so no data is silently lost.
  */
-export class PatternParser {
+export class PatternParser implements LogParser {
+  readonly kind = 'pattern' as const
   readonly template: string
   private regex: RegExp
   private groups: string[]
@@ -29,10 +30,19 @@ export class PatternParser {
     this.groups = compiled.groups
   }
 
+  /** LogParser entry point (engine assigns `seq`). */
+  parse(line: string, lineNo: number): DraftEntry[] {
+    return [this.draft(line, lineNo)]
+  }
+
   parseLine(line: string, seq: number, lineNo: number): LogEntry {
+    return { ...this.draft(line, lineNo), seq }
+  }
+
+  private draft(line: string, lineNo: number): DraftEntry {
     const m = this.regex.exec(line)
     if (!m) {
-      return { seq, ts: null, level: null, message: line, raw: line, lineNo }
+      return { ts: null, level: null, message: line, raw: line, lineNo }
     }
     const first: Partial<Record<string, string>> = {}
     for (let i = 0; i < this.groups.length; i++) {
@@ -41,7 +51,6 @@ export class PatternParser {
     }
     const dateVal = first['%d']
     return {
-      seq,
       ts: dateVal != null ? parseTimestamp(dateVal) : null,
       level: normalizeLevel(first['%l']),
       message: first['%m'] ?? '',

@@ -1,8 +1,9 @@
 import { ParseEngine } from './parser-engine'
+import type { ParserSpec } from '../parsers/types'
 
 /**
  * Thin Web Worker shell around {@link ParseEngine}.
- * Inbound:  { type: 'init', template? } | { type: 'chunk', text } | { type: 'finish' }
+ * Inbound:  { type: 'init', spec?, fileName? } | { type: 'chunk', text } | { type: 'finish' }
  * Outbound: { type: 'rows', rows } | { type: 'progress', lines, entries } | { type: 'done', lines, entries }
  */
 interface WorkerScope {
@@ -16,13 +17,13 @@ let engine: ParseEngine | null = null
 
 scope.onmessage = (ev: MessageEvent) => {
   const msg = ev.data as
-    | { type: 'init'; template?: string }
+    | { type: 'init'; spec?: ParserSpec; fileName?: string }
     | { type: 'chunk'; text: string }
     | { type: 'finish' }
 
   switch (msg.type) {
     case 'init':
-      engine = new ParseEngine(msg.template, rows => scope.postMessage({ type: 'rows', rows }))
+      engine = new ParseEngine(msg.spec, rows => scope.postMessage({ type: 'rows', rows }), 5000, msg.fileName)
       break
     case 'chunk':
       if (!engine) return

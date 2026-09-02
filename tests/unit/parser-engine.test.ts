@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ParseEngine } from '../../src/workers/parser-engine'
-import type { LogEntry } from '../../src/parsers/types'
+import type { LogEntry, ParserSpec } from '../../src/parsers/types'
 
 const TEXT = [
   '2026-09-01 08:00:01 INFO: first',
@@ -15,9 +15,13 @@ interface RunResult {
   engine: ParseEngine
 }
 
-function run(feed: (e: ParseEngine) => void, template?: string): RunResult {
+function patternSpec(template?: string): ParserSpec | undefined {
+  return template ? { kind: 'pattern', template } : undefined
+}
+
+function run(feed: (e: ParseEngine) => void, spec?: ParserSpec): RunResult {
   const batches: LogEntry[][] = []
-  const engine = new ParseEngine(template, rows => batches.push(rows))
+  const engine = new ParseEngine(spec, rows => batches.push(rows))
   feed(engine)
   engine.finish()
   return { rows: batches.flat(), batchSizes: batches.map(b => b.length), engine }
@@ -87,13 +91,37 @@ describe('ParseEngine', () => {
     expect(batches.flat().map(r => r.seq)).toEqual([...Array(12).keys()])
   })
 
-  it('supports template swap before feeding', () => {
+  it('supports parser swap before feeding', () => {
     const { rows } = run(e => {
-      e.setTemplate('%d %m')
+      e.setParser({ kind: 'pattern', template: '%d %m' })
       e.feed('2026-09-01T08:02:33.123456Z GC(41) Pause Young 245M->98M 1.2ms\n')
     })
     expect(rows[0].ts).toBe(Date.UTC(2026, 8, 1, 8, 2, 33, 123))
     expect(rows[0].message).toBe('GC(41) Pause Young 245M->98M 1.2ms')
+  })
+
+  it('stamps the source file name on every entry', () => {
+    const batches: LogEntry[][] = []
+    const engine = new ParseEngine(patternSpec(), rows => batches.push(rows), 5000, 'app.log')
+    engine.feed(TEXT)
+    engine.finish()
+    expect(batches.flat().every(r => r.file === 'app.log')).toBe(true)
+  })
+
+  it('handles stateful parsers emitting 0..n entries per line (log4j xml)', () => {
+    const xml = [
+      '<log4j:event logger="a" thread="t" level="INFO" timestamp="1788220801000">',
+      '<log4j:message>first message</log4j:message>',
+      '</log4j:event>',
+      '<log4j:event logger="b" thread="t" level="ERROR" timestamp="1788220802000"/>',
+    ].join('\n')
+    const { rows, engine } = run(e => e.feed(xml), { kind: 'log4j-xml' })
+    expect(rows.map(r => r.message)).toEqual(['first message', ''])
+    expect(rows.map(r => r.level)).toEqual(['INFO', 'ERROR'])
+    expect(rows.map(r => r.ts)).toEqual([1788220801000, 1788220802000])
+    expect(rows.map(r => r.seq)).toEqual([0, 1])
+    expect(engine.stats.entries).toBe(2)
+    expect(engine.stats.lines).toBe(4)
   })
 
   it('parses the mixed-levels fixture end to end', async () => {

@@ -1,0 +1,8 @@
+timestamp,level,message
+2026-09-01 08:00:01,INFO,Batch job started
+2026-09-01 08:00:05,INFO,Processed 1000 records
+2026-09-01 08:00:09,WARN,Retry 1 for record 4821
+2026-09-01 08:00:12,ERROR,Record 4821 failed validation
+2026-09-01 08:00:15,INFO,Processed 2000 records
+2026-09-01 08:00:20,WARN,Retry 2 for record 4821
+2026-09-01 08:00:24,FATAL,Batch aborted after 3 retries

@@ -1,7 +1,7 @@
 /** Date/time token union: ISO 8601 (T or space, optional fraction/Z/offset) | Apache CLF | short date+time. */
 const DATE_PATTERN =
   String.raw`\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})?` +
-  String.raw`|\d{2}/[A-Za-z]{3}/\d{4}:\d{2}:\d{2}:\d{2}(?:[+-]\d{4})?` +
+  String.raw`|\d{2}/[A-Za-z]{3}/\d{4}:\d{2}:\d{2}:\d{2}(?: [+-]\d{4})?` +
   String.raw`|\d{1,2}[/-]\d{1,2}[/-]\d{2,4} \d{2}:\d{2}:\d{2}`
 
 export interface SpecifierDef {

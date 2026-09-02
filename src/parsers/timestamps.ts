@@ -5,7 +5,7 @@ const MONTHS: Record<string, number> = {
 
 const ISO_RE =
   /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:[.,](\d{1,9}))?(Z|[+-]\d{2}:?\d{2})?$/
-const CLF_RE = /^(\d{2})\/([A-Za-z]{3})\/(\d{4}):(\d{2}):(\d{2}):(\d{2})([+-]\d{4})?$/
+const CLF_RE = /^(\d{2})\/([A-Za-z]{3})\/(\d{4}):(\d{2}):(\d{2}):(\d{2})(?: ([+-]\d{4}))?$/
 
 function fracMs(frac: string): number {
   return frac === '' ? 0 : parseInt(frac.padEnd(3, '0').slice(0, 3), 10)

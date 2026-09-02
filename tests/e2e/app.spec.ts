@@ -45,6 +45,28 @@ test('parse fixture, then filter by level and text', async ({ page }) => {
   await expect.poll(() => counts(page)).toEqual({ total: 40, visible: 1 })
 })
 
+test('auto-detects W3C and JSON formats per file', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('file-input').setInputFiles([
+    'tests/fixtures/logs/iis-u_ex.log',
+    'tests/fixtures/logs/app.json',
+  ])
+
+  // Active tab is the first file (IIS u_ex): 4 # header rows kept raw + 14 data.
+  await expect.poll(() => counts(page), { timeout: 20_000 }).toEqual({ total: 18, visible: 18 })
+
+  // W3C level is derived from sc-status: exactly three 4xx rows are WARN.
+  await page.getByTestId('level-WARN').click()
+  await expect.poll(() => counts(page)).toEqual({ total: 18, visible: 3 })
+  await page.getByTestId('level-WARN').click()
+
+  // JSON tab: 12 entries, one FATAL.
+  await page.getByTestId('tab-app.json').click()
+  await expect.poll(() => counts(page)).toEqual({ total: 12, visible: 12 })
+  await page.getByTestId('level-FATAL').click()
+  await expect.poll(() => counts(page)).toEqual({ total: 12, visible: 1 })
+})
+
 test('perf: 10 MB file parses and fully paints in acceptable time', async ({ page }) => {
   test.skip(!process.env.PERF, 'set PERF=1 to run the perf gate (needs generated fixture)')
   await page.goto('/')

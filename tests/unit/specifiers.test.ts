@@ -33,11 +33,11 @@ describe('compilePattern', () => {
     expect(m?.[2]).toBe('GC(41) Pause Young 245M->98M 1.2ms')
   })
 
-  it('supports Apache CLF-style timestamps', () => {
+  it('supports Apache CLF-style timestamps (offset captured, M2)', () => {
     const { regex } = compilePattern('%d %m')
     const m = regex.exec('01/Sep/2026:08:02:33 +0000 GET /index.html 200 1234')
-    expect(m?.[1]).toBe('01/Sep/2026:08:02:33')
-    expect(m?.[2]).toBe('+0000 GET /index.html 200 1234')
+    expect(m?.[1]).toBe('01/Sep/2026:08:02:33 +0000')
+    expect(m?.[2]).toBe('GET /index.html 200 1234')
   })
 
   it('rejects lines that do not start with the template shape', () => {

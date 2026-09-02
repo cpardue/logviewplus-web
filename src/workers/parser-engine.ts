@@ -1,5 +1,5 @@
-import { PatternParser } from '../parsers/PatternParser'
-import type { LogEntry } from '../parsers/types'
+import { createParser } from '../parsers/factory'
+import type { LogEntry, LogParser, ParserSpec } from '../parsers/types'
 
 export interface EngineStats {
   lines: number
@@ -13,10 +13,11 @@ export interface EngineStats {
  * Accumulates a possible partial trailing line across `feed()` calls so chunk
  * boundaries never split an entry. Emits batches of at most `batchLimit` rows;
  * any pending remainder is emitted at the end of a feed that produced no
- * full-batch flush, or on `finish()`.
+ * full-batch flush, or on `finish()`. Stateful parsers (XML) also get an
+ * EOF flush via their optional `finish()`.
  */
 export class ParseEngine {
-  private parser: PatternParser
+  private parser: LogParser
   private partial = ''
   private seq = 0
   private batch: LogEntry[] = []
@@ -24,15 +25,16 @@ export class ParseEngine {
   readonly stats: EngineStats = { lines: 0, entries: 0, chunks: 0, bytesSeen: 0 }
 
   constructor(
-    template?: string,
+    spec?: ParserSpec,
     private readonly onBatch?: (rows: LogEntry[]) => void,
     private readonly batchLimit = 5000,
+    private readonly fileName?: string,
   ) {
-    this.parser = new PatternParser({ template })
+    this.parser = createParser(spec)
   }
 
-  setTemplate(template: string): void {
-    this.parser = new PatternParser({ template })
+  setParser(spec: ParserSpec): void {
+    this.parser = createParser(spec)
   }
 
   /** Feed one decoded text chunk (any size; '\n' separated). */
@@ -54,13 +56,27 @@ export class ParseEngine {
       this.pushLine(this.partial.replace(/\r$/, ''))
       this.partial = ''
     }
+    const tail = this.parser.finish?.(this.stats.lines)
+    if (tail) this.emit(tail)
     this.flush()
   }
 
   private pushLine(line: string): void {
     this.stats.lines++
     if (line === '') return
-    const entry = this.parser.parseLine(line, this.seq++, this.stats.lines)
+    for (const d of this.parser.parse(line, this.stats.lines)) this.emit(d)
+  }
+
+  private emit(draft: Omit<LogEntry, 'seq'>): void {
+    const entry: LogEntry = {
+      seq: this.seq++,
+      ts: draft.ts,
+      level: draft.level,
+      message: draft.message,
+      raw: draft.raw,
+      lineNo: draft.lineNo,
+      ...(this.fileName ? { file: this.fileName } : {}),
+    }
     this.stats.entries++
     this.batch.push(entry)
     if (this.batch.length >= this.batchLimit) {

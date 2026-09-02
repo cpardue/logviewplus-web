@@ -1,6 +1,6 @@
 import { readTextChunks } from './fileSource'
-import { PatternParser } from '../parsers/PatternParser'
-import type { LogEntry } from '../parsers/types'
+import { detectFormat } from '../parsers/detect'
+import type { LogEntry, ParserSpec } from '../parsers/types'
 
 export interface ParseCallbacks {
   onRows(rows: LogEntry[]): void
@@ -14,7 +14,7 @@ export interface ParseSession {
 }
 
 /**
- * Orchestrate one file: template autodetect from the first chunk, stream 1 MiB
+ * Orchestrate one file: parser autodetect from the first chunk, stream 1 MiB
  * text chunks into a parse worker, route results back via callbacks.
  */
 export function startParse(file: File, callbacks: ParseCallbacks): ParseSession {
@@ -53,8 +53,8 @@ export function startParse(file: File, callbacks: ParseCallbacks): ParseSession 
     for await (const { text } of readTextChunks(file)) {
       if (closed) return
       if (!inited) {
-        const template = PatternParser.detectTemplate(text.split('\n').slice(0, 200))
-        worker.postMessage({ type: 'init', template })
+        const spec: ParserSpec = detectFormat(text.split('\n').slice(0, 200))
+        worker.postMessage({ type: 'init', spec, fileName: file.name })
         inited = true
       }
       worker.postMessage({ type: 'chunk', text })

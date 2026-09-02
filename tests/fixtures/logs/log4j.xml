@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE log4j:eventNotification SYSTEM "http://apache.org/log4j/xml/event.dtd">
+<log4j:event logger="com.app.Main" thread="main" level="INFO" timestamp="1788220801000">
+<log4j:message>Application starting up</log4j:message>
+</log4j:event>
+<log4j:event logger="com.app.Config" thread="main" level="DEBUG" timestamp="1788220805500">
+<log4j:message>Loading configuration
+read 42 keys from /etc/app/config.yml</log4j:message>
+</log4j:event>
+<log4j:event logger="com.app.db" thread="pool-1" level="WARN" timestamp="1788220810000">
+<log4j:message>Pool at 90% capacity (9/10)</log4j:message>
+</log4j:event>
+<log4j:event logger="com.app.cache" thread="pool-1" level="ERROR" timestamp="1788220815000">
+<log4j:message>Connection refused: redis:6379 &amp; retry budget exhausted</log4j:message>
+</log4j:event>
+<log4j:event logger="com.app.worker" thread="worker-3" level="FATAL" timestamp="1788220820000">
+<log4j:message>Unhandled exception in worker 3: OutOfMemoryError</log4j:message>
+</log4j:event>
