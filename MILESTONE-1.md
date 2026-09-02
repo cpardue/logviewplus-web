@@ -57,7 +57,7 @@ zip/clipboard, tail, persistence, export. (Placeholder stubs only where cheap.)
 ## Acceptance criteria (Definition of Done)
 
 - [x] `npm test` green (unit), `npm run test:e2e` green (Chromium headless)
-- [ ] CI green on push to `main`; site live at `https://<user>.github.io/logviewplus-web/`
+- [x] CI green on push to `main`; site live at `https://cpardue.github.io/logviewplus-web/`
 - [x] 10 MB and 100 MB generated fixtures meet perf gate; numbers recorded (`tests/perf.md`)
 - [x] README updated: usage instructions + perf table + known limitations
 - [x] History file entry written (milestone complete)
