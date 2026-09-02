@@ -3,7 +3,7 @@
 > **Read this first in every new session.** Companion docs: `PLAN.md`,
 > `MILESTONE-1.md`, `README.md`, `tests/perf.md`, and the history file at
 > `../history/logviewplus-web.md` (one level up, outside the repo).
-> Last updated: 2026-09-02 ~10:45 — M1 COMPLETE (Pages live, acceptance done).
+> Last updated: 2026-09-02 ~11:00 — M1 COMPLETE (Pages live; final head `707142f`, CI green).
 
 ## 0. Where we are (TL;DR)
 
@@ -20,7 +20,9 @@
   `33649988195` → build ✅ + deploy ✅; site live at
   `https://cpardue.github.io/logviewplus-web/` serving the exact M1 build
   (served asset hash `index-qasf4OWi.js` == local `npm run build` output); last
-  `MILESTONE-1.md` acceptance box checked. Next up: **M2** (§6).
+  `MILESTONE-1.md` acceptance box checked. Remote head `707142f` = M1 code
+  (`bb1ef8a`) + docs/pusher-cleanup commits; CI green on that push (run
+  `33651916592`). Next up: **M2** (§6).
 
 ## 1. ~~Immediate task: enable Pages, verify live site~~ — DONE 2026-09-02
 
@@ -145,6 +147,11 @@ $env:PERF='1'; $env:PERF_100='1'; npx playwright test   # all 3 incl. 100 MB gat
   `isIgnored({fs, dir, gitdir, filepath})`; use `getRemoteInfo` (has `.refs`).
 - **Playwright test timeout** is 300 s in `playwright.config.ts` (100 MB gate
   needs headroom; poll timeouts inside specs are separate).
+- **API pusher used to keep remote-only files despite warning it would drop them** —
+  four temp probe files got committed in `e53a831` (2026-09-02). Fixed:
+  `scripts/git-push-api.mjs` now excludes remote-only paths from the new tree and
+  commits on deletion-only changes too; `.gitignore` has `_probe_*.mjs` +
+  `_probe_out.txt`. Still: never leave temp files in the workdir at push time.
 
 ## 5. Repo map (where things live)
 
