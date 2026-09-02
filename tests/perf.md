@@ -43,3 +43,26 @@ The perf tests live in `tests/e2e/app.spec.ts` and are skipped unless the
 - Parsing itself (worker, regex per line) is not the bottleneck — the dominant
   cost was originally handing every 5k-row batch to AG Grid (O(n²) re-diffs);
   the grid now receives row data once per completed file.
+
+## M2 re-check (2026-09-02)
+
+Same fixtures, same metric (file picked → parse complete + full grid row
+model ready), headless Chromium against `vite preview`, this dev machine.
+
+| Scenario | Gate | Measured (run 1 / run 2) | Status |
+| --- | --- | --- | --- |
+| 10 MB: parse + full grid ready | < 5 s (M2 DoD; target 3 s) | **1.34 s / 1.55 s** | PASS |
+| 100 MB: completes, no tab crash, grid scrolls | completes + scrolls | **10.2 s / 9.5 s**, scroll OK | PASS |
+
+Notes:
+
+- The 10 MB gate passes with ~3x headroom. M2's added per-line work is only
+  `entry.file` stamping plus a one-time autodetect pass over the first 200
+  sample lines — negligible at these sizes.
+- 100 MB wall time is ~2x the single M1 measurement (5.4 s). The pattern
+  parse path is unchanged since M1, and today's machine had OneDrive syncing
+  this workspace plus VS Code / MCP servers running — treat the absolute
+  number as noisy. The pass criterion (completes + scrolls) holds comfortably.
+- **M3 investigation item:** one quiet-machine 100 MB run to pin down whether
+  the ~2x is environmental; if real, profile the parse path (suspects:
+  draft-entry allocation shape, string row-id keys).

@@ -10,22 +10,30 @@ Intended for personal/internal use (GitHub Pages ToS prohibits commercial SaaS).
 
 ## Status
 
-**Milestone 1 complete (2026-09-01):** open local log files, stream-parse them
-in a Web Worker with an LVP-style pattern parser, and browse results in a
-virtualized grid with text + level filtering.
+**Milestone 2 complete (2026-09-02):** on top of M1 — auto-detected
+multi-format parsing (custom `%d %l: %m`-style patterns, IIS W3C, Apache
+common/combined, JSON lines, Log4j XML, CSV/TSV), richer date rules
+(naive-timestamp timezone mode, yearless syslog dates, epoch + ISO ordinal
+dates), a merged "All" view with a File column, zip / clipboard ingest, saved
+filters persisted in IndexedDB, and CSV/JSON export of the filtered rows.
 
 - `PLAN.md` — repo scaffold, tech stack, deployment design, constraints, roadmap
 - `MILESTONE-1.md` — M1 tasks + acceptance criteria (done)
-- `tests/perf.md` — measured performance numbers
+- `MILESTONE-2.md` — M2 tasks + acceptance criteria (done)
+- `tests/perf.md` — measured performance numbers (M1 + M2 re-check)
 
 ## Usage
 
 Open the site, then drag & drop log files anywhere or use **Open files…**
-(multiple files get tabs). Per file you get: name, size, live parse progress,
-entries/lines + elapsed time; Time / Level / Message columns with level row
+(multiple files get tabs; `.zip` drops extract into one tab per member and
+pasted text becomes a synthetic file). Formats are auto-detected per file. Per
+file you get: name, size, live parse progress, entries/lines + elapsed time;
+Time / Level / Message (+ File in merged view) columns with level row
 coloring; a case-insensitive text filter and level chips that apply to the
-parsed data without re-parsing. All parsing happens locally in your browser —
-files are never uploaded.
+parsed data without re-parsing; saved filter sets persisted in IndexedDB;
+CSV/JSON export of the filtered rows; and a "Naive times: Local/UTC" setting
+for zone-less timestamps. All parsing happens locally in your browser — files
+are never uploaded.
 
 ```
 npm install
@@ -45,18 +53,19 @@ Deployment: push to `main` → GitHub Actions builds and deploys to GitHub Pages
 
 | Scenario | Gate | Measured |
 | --- | --- | --- |
-| 10 MB → parse + full grid ready | < 3 s | **0.74 s** warm / 2.6 s cold |
-| 100 MB → completes, no tab crash, scrolls | completes + scrolls | **5.4 s**, scroll OK |
+| 10 MB → parse + full grid ready | < 3 s (M2 gate < 5 s) | **0.74 s** warm / 2.6 s cold (M1); **1.34–1.55 s** (M2 re-check, 2026-09-02) |
+| 100 MB → completes, no tab crash, scrolls | completes + scrolls | **5.4 s** (M1); **9.5–10.2 s** (M2 re-check — noisy machine, see `tests/perf.md`) |
 
 Details and how to reproduce: `tests/perf.md`.
 
-## Known limitations (M1)
+## Known limitations
 
-- Pattern parser only (`%d %l: %m` default, light autodetect over
-  `%d [%t] %l: %m` / `%d %m`). The IIS W3C and JSON-lines fixtures ship now for
-  the M2 parser types.
-- Naive timestamps (no timezone) are interpreted as local time.
+- Naive timestamps (no timezone) follow the "Naive times" setting (default
+  Local); changing it only affects files opened afterwards — already-opened
+  files must be reopened.
+- Saved filters are stored per browser profile in IndexedDB (client-side only;
+  clearing site data clears them).
 - Memory ≈ 1 GB heap at 100 MB / 1.4M rows — practical ceiling ~500 MB files
-  before columnar/typed-array storage (M2 work).
-- No persistence, export, merge, zip/clipboard ingest, or tail yet
-  (M2/M3 per `PLAN.md`).
+  before columnar/typed-array storage (M3 work).
+- No tail-following yet; M3 also brings SQL reporting via DuckDB-WASM (per
+  `PLAN.md`).

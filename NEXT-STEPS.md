@@ -3,26 +3,31 @@
 > **Read this first in every new session.** Companion docs: `PLAN.md`,
 > `MILESTONE-1.md`, `README.md`, `tests/perf.md`, and the history file at
 > `../history/logviewplus-web.md` (one level up, outside the repo).
-> Last updated: 2026-09-02 ~11:00 — M1 COMPLETE (Pages live; final head `707142f`, CI green).
+> Last updated: 2026-09-02 ~17:10 — M2 COMPLETE (all six areas done, gates green;
+> head `215d31f` + closeout docs push; next: M3).
 
 ## 0. Where we are (TL;DR)
 
-- **M1 (parse pipeline MVP) is implemented and verified locally**: parser core,
-  streaming worker, AG Grid UI, filters, fixtures, 36 unit tests, E2E + perf gates.
-  All gates green (lint / 36 unit / 3 E2E / build). Perf: 10 MB → 0.74 s warm
-  (< 3 s target), 100 MB → 5.4 s, no tab crash, grid scrolls. Numbers in `tests/perf.md`.
-- **M1 pushed**: code at commit `bb1ef8a` on remote `main` (verified: 51 files, no
-  generated/node_modules/dist leaked, all fixtures present); docs closed by the
-  follow-up "M1 complete" commit.
-- **CI build gate passes on Actions** (Lint, Unit tests, Build steps green).
-- **M1 COMPLETE — 2026-09-02**: user enabled Pages in the UI (Source: GitHub
-  Actions; API cannot create the site — see §1/§2); dispatch run
-  `33649988195` → build ✅ + deploy ✅; site live at
-  `https://cpardue.github.io/logviewplus-web/` serving the exact M1 build
-  (served asset hash `index-qasf4OWi.js` == local `npm run build` output); last
-  `MILESTONE-1.md` acceptance box checked. Remote head `707142f` = M1 code
-  (`bb1ef8a`) + docs/pusher-cleanup commits; CI green on that push (run
-  `33651916592`). Next up: **M2** (§6).
+- **M2 COMPLETE — 2026-09-02**: all six M2 areas implemented, gated and pushed —
+  parser breadth (W3C / Apache common+combined / JSON lines / Log4j XML / DSV +
+  pattern fallback with per-file autodetect), date rules (`%S`/`%s` specifiers,
+  ISO ordinal dates, naive-timestamp Local/UTC mode), merged "All" view with File
+  column, zip + clipboard ingest, saved filters (IndexedDB, `src/lib/filters-db.ts`),
+  CSV/JSON export of filtered rows (`src/lib/export.ts` + ExportBar).
+- **M2 gates green**: lint / 110 unit (15 files) / build / 9 e2e — incl. new
+  specs for autodetect, merge, zip, paste, saved-filter persistence (test waits
+  for the IDB put to commit before reloading), and CSV/JSON export downloads.
+- **M2 perf re-check** (`tests/perf.md`): 10 MB = 1.34–1.55 s (< 5 s gate, ~3x
+  headroom); 100 MB = 9.5–10.2 s, completes + scrolls (M1's single measurement
+  was 5.4 s — noisy-machine caveat + M3 investigation item recorded there).
+- **Remote state**: M2 landed as commits A (parser breadth) → B (dates) → C
+  (merge/ingest) → D `215d31f` (M2.5+M2.6: saved filters + export; that push
+  also dropped a stray `_test_out.txt` an earlier push had shipped) — plus this
+  closeout docs commit on top. CI (Lint/Unit/Build + Pages deploy) runs on each
+  push.
+- Next up: **M3** — DuckDB-WASM SQL reporting/dashboards (sql.js fallback per
+  PLAN.md), tail-following, and the 100 MB perf investigation item from
+  `tests/perf.md`.
 
 ## 1. ~~Immediate task: enable Pages, verify live site~~ — DONE 2026-09-02
 
@@ -153,7 +158,9 @@ $env:PERF='1'; $env:PERF_100='1'; npx playwright test   # all 3 incl. 100 MB gat
   commits on deletion-only changes too; `.gitignore` has `_probe_*.mjs` +
   `_probe_out.txt`. Still: never leave temp files in the workdir at push time.
 
-## 5. Repo map (where things live)
+## 5. Repo map (where things live) — M1 snapshot; M2 added the `src/parsers/*`
+breadth (Json/W3c/Combined/Dsv/XmlLog4j + detect/factory), `src/lib/{ingest,filters-db,export}.ts`,
+and `src/components/ExportBar.tsx`
 
 ```
 src/parsers/        pure parser core: types.ts, levels.ts, timestamps.ts,
@@ -186,7 +193,7 @@ tests/perf.md       measured numbers + how to reproduce + known bottlenecks
 .github/workflows/deploy.yml   see §2
 ```
 
-## 6. M2 scope (after Pages live; from PLAN.md §5, suggested order)
+## 6. ~~M2 scope (after Pages live; from PLAN.md §5, suggested order)~~ — DONE 2026-09-02
 
 1. **Parser breadth**: W3C/combined (`iis-u_ex.log` fixture ships), JSON lines
    (`app.json` ships), Log4j XML, DSV — plus richer autodetect. `PatternParser`
@@ -219,8 +226,8 @@ Per milestone: new fixtures + unit tests + E2E updates + perf check + push via
 
 - `../history/logviewplus-web.md` — lives OUTSIDE the repo (workspace root, one
   level up), so it never ships in a push; it is the per-.clinerules history file.
-- `NEXT-STEPS.md` + `MILESTONE-1.md` — this update ships with the "M1 complete"
-  push. Nothing else pending locally.
+- This update ships with the "M2 complete" closeout push. Nothing else pending
+  locally (scratch `_*.txt` / probe files are deleted before every push).
 
 
 

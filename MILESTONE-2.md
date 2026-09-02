@@ -58,7 +58,7 @@ clipboard, persist saved filters, and export filtered entries.
 - [x] Saved filters survive a page reload (IndexedDB); E2E save/apply
 - [x] Export CSV/JSON of filtered rows downloads with correct row count (E2E)
 - [x] Perf re-check: 10 MB < 5 s gate still passes; numbers in `tests/perf.md`
-- [ ] README updated; NEXT-STEPS §0 truthful; history entry written
+- [x] README updated; NEXT-STEPS §0 truthful; history entry written
 
 ## As-built notes (deviations from plan)
 
