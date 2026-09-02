@@ -123,26 +123,32 @@ for (const p of localFiles) {
     toCreate++
   }
 }
+const remoteOnly = []
 for (const [p] of remoteShas) {
   if (!localFiles.includes(p)) {
+    remoteOnly.push(p)
     console.warn(`WARN: remote file ${p} missing locally — it will be dropped from the tree`)
   }
 }
 
-if (changed.length === 0) {
+if (changed.length === 0 && remoteOnly.length === 0) {
   console.log('Nothing to do — remote main already matches the working tree.')
   process.exit(0)
 }
 
 // --- create tree (flat nested paths; GitHub materializes intermediate trees) ---
 const unchanged = [...remoteShas]
-  .filter(([p]) => !changed.some(c => c.path === p))
+  .filter(([p]) => !changed.some((c) => c.path === p) && !remoteOnly.includes(p))
   .map(([p, sha]) => ({ path: p, mode: '100644', type: 'blob', sha }))
 const tree = await api('POST', `${API}/git/trees`, { tree: [...changed, ...unchanged] })
 
 // --- commit + move ref (non-force, fast-forward) ---
 const commit = await api('POST', `${API}/git/commits`, {
-  message: process.argv[2] ?? 'Update from local working tree',
+  message:
+    process.argv[2] ??
+    (changed.length > 0
+      ? 'Update from local working tree'
+      : `Drop ${remoteOnly.length} remote-only file(s): ${remoteOnly.join(', ')}`),
   tree: tree.sha,
   parents: [headSha],
   author: IDENTITY,
