@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import {
   CommunityFeaturesModule,
   GridCoreModule,
@@ -21,7 +21,7 @@ const ROW_STYLES: Record<string, string> = {
   FATAL: 'rgba(183,28,28,0.42)',
 }
 
-const columns: ColDef<LogEntry>[] = [
+const BASE_COLUMNS: ColDef<LogEntry>[] = [
   {
     headerName: 'Time',
     field: 'ts',
@@ -38,13 +38,21 @@ const columns: ColDef<LogEntry>[] = [
   { headerName: 'Message', field: 'message', flex: 1 },
 ]
 
+const FILE_COLUMN: ColDef<LogEntry> = { headerName: 'File', field: 'file', width: 180 }
+
 interface Props {
   rows: LogEntry[]
   fileId: string
+  /** Show the source-file column (merged view). */
+  showFile?: boolean
 }
 
-export default function LogGrid({ rows, fileId }: Props) {
+export default function LogGrid({ rows, fileId, showFile = false }: Props) {
   const apiRef = useRef<GridApi<LogEntry> | null>(null)
+  const columns = useMemo(
+    () => (showFile ? [FILE_COLUMN, ...BASE_COLUMNS] : BASE_COLUMNS),
+    [showFile],
+  )
 
   // Expose the grid API for E2E assertions (row counts after virtualization).
   useEffect(() => {
@@ -58,7 +66,7 @@ export default function LogGrid({ rows, fileId }: Props) {
       <AgGridReact<LogEntry>
         columnDefs={columns}
         rowData={rows}
-        getRowId={p => `${fileId}-${p.data.lineNo}`}
+        getRowId={p => `${p.data.file ?? fileId}-${p.data.lineNo}`}
         getRowStyle={p => {
           const bg = p.data ? ROW_STYLES[p.data.level ?? ''] : ''
           return bg ? { backgroundColor: bg } : undefined

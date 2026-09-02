@@ -67,6 +67,63 @@ test('auto-detects W3C and JSON formats per file', async ({ page }) => {
   await expect.poll(() => counts(page)).toEqual({ total: 12, visible: 1 })
 })
 
+test('merged All view combines files and filters across them', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('file-input').setInputFiles([FIXTURE, 'tests/fixtures/logs/iis-u_ex.log'])
+
+  // First file active: 40 entries.
+  await expect.poll(() => counts(page), { timeout: 20_000 }).toEqual({ total: 40, visible: 40 })
+
+  // "All" tab merges both (40 + 18 = 58); level filter spans both sources.
+  await page.getByTestId('tab-all').click()
+  await expect.poll(() => counts(page)).toEqual({ total: 58, visible: 58 })
+  await page.getByTestId('level-WARN').click()
+  await expect.poll(() => counts(page)).toEqual({ total: 58, visible: 10 }) // 7 + 3
+
+  // Clicking a file tab exits the merged view.
+  await page.getByTestId(`tab-${FIXTURE.split('/').pop()}`).click()
+  await expect.poll(() => counts(page)).toEqual({ total: 40, visible: 7 }) // WARN filter persists
+})
+
+test('zip drop extracts members into separate parsed files', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('file-input').setInputFiles('tests/fixtures/logs/packed.zip')
+
+  // Both members land as tabs; first (a.log) is active with 3 entries.
+  await expect(page.getByTestId('tab-a.log'), { timeout: 20_000 }).toBeVisible()
+  await expect(page.getByTestId('tab-b.csv')).toBeVisible()
+  await expect.poll(() => counts(page)).toEqual({ total: 3, visible: 3 })
+
+  // a.log has one WARN; b.csv (DSV) has one FATAL.
+  await page.getByTestId('level-WARN').click()
+  await expect.poll(() => counts(page)).toEqual({ total: 3, visible: 1 })
+  await page.getByTestId('level-WARN').click()
+  await page.getByTestId('tab-b.csv').click()
+  await expect.poll(() => counts(page)).toEqual({ total: 3, visible: 3 })
+  await page.getByTestId('level-FATAL').click()
+  await expect.poll(() => counts(page)).toEqual({ total: 3, visible: 1 })
+})
+
+test('pasted text drop ingests as a synthetic file', async ({ page }) => {
+  await page.goto('/')
+  await page.evaluate(() => {
+    const dt = new DataTransfer()
+    dt.setData(
+      'text/plain',
+      '2026-09-01 08:00:01 INFO: pasted one\n2026-09-01 08:00:02 ERROR: pasted two',
+    )
+    const ev = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })
+    document.querySelector('.app')?.dispatchEvent(ev)
+  })
+
+  // Synthetic file parses like any other (2 entries, 1 ERROR).
+  await expect.poll(() => counts(page), { timeout: 20_000 }).toEqual({ total: 2, visible: 2 })
+  const tabName = await page.locator('[data-testid^="tab-pasted-"]').first().getAttribute('data-testid')
+  expect(tabName).toMatch(/^tab-pasted-\d{8}-\d{6}\.log$/)
+  await page.getByTestId('level-ERROR').click()
+  await expect.poll(() => counts(page)).toEqual({ total: 2, visible: 1 })
+})
+
 test('perf: 10 MB file parses and fully paints in acceptable time', async ({ page }) => {
   test.skip(!process.env.PERF, 'set PERF=1 to run the perf gate (needs generated fixture)')
   await page.goto('/')

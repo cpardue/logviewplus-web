@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { LogEntry, LogLevel } from '../parsers/types'
 import { EMPTY_FILTERS, type Filters } from '../lib/filters'
 import { startParse, type ParseSession } from '../lib/pipeline'
+import { ingestZip } from '../lib/ingest'
 
 export interface FileState {
   id: string
@@ -23,9 +24,12 @@ interface LogState {
   filters: Filters
   /** How zone-less timestamps are interpreted while parsing (persisted). */
   tzMode: 'local' | 'utc'
+  /** "All" merged view across every ready file. */
+  merged: boolean
   addFiles(list: FileList | File[]): void
   removeFile(id: string): void
   setActive(id: string | null): void
+  setMerged(on: boolean): void
   setText(text: string): void
   toggleLevel(level: LogLevel): void
   clearFilters(): void
@@ -45,87 +49,130 @@ function readTzMode(): 'local' | 'utc' {
   }
 }
 
+/** Expand a zip into its member files; non-zips pass through unchanged. */
+async function expand(list: File[]): Promise<{ files: File[]; failures: { name: string; size: number; error: string }[] }> {
+  const files: File[] = []
+  const failures: { name: string; size: number; error: string }[] = []
+  for (const f of list) {
+    if (f.name.toLowerCase().endsWith('.zip')) {
+      try {
+        files.push(...(await ingestZip(f)))
+      } catch (err) {
+        failures.push({ name: f.name, size: f.size, error: `ZIP failed: ${String(err)}` })
+      }
+    } else {
+      files.push(f)
+    }
+  }
+  return { files, failures }
+}
+
 export const useLogStore = create<LogState>((set, get) => ({
   files: {},
   activeId: null,
   filters: EMPTY_FILTERS,
   tzMode: readTzMode(),
+  merged: false,
 
   addFiles(list) {
-    for (const file of Array.from(list)) {
-      const id = `f${nextId++}`
-      set(s => ({
-        files: {
-          ...s.files,
-          [id]: {
-            id,
-            name: file.name,
-            size: file.size,
-            status: 'parsing',
-            fraction: 0,
-            lines: 0,
-            startedAt: performance.now(),
-            finishedAt: null,
-            entries: [],
+    void (async () => {
+      const { files, failures } = await expand(Array.from(list))
+      for (const fail of failures) {
+        const id = `f${nextId++}`
+        set(s => ({
+          files: {
+            ...s.files,
+            [id]: {
+              id,
+              name: fail.name,
+              size: fail.size,
+              status: 'error',
+              fraction: 0,
+              lines: 0,
+              startedAt: performance.now(),
+              finishedAt: performance.now(),
+              entries: [],
+              error: fail.error,
+            },
           },
-        },
-        activeId: s.activeId ?? id,
-      }))
-      sessions.set(
-        id,
-        startParse(
-          file,
-          {
-          onRows(rows) {
-            set(s => {
-              const f = s.files[id]
-              if (!f || f.status === 'error') return s
-              return { files: { ...s.files, [id]: { ...f, entries: [...f.entries, ...rows] } } }
-            })
+          activeId: s.activeId ?? id,
+        }))
+      }
+      for (const file of files) {
+        const id = `f${nextId++}`
+        set(s => ({
+          files: {
+            ...s.files,
+            [id]: {
+              id,
+              name: file.name,
+              size: file.size,
+              status: 'parsing',
+              fraction: 0,
+              lines: 0,
+              startedAt: performance.now(),
+              finishedAt: null,
+              entries: [],
+            },
           },
-          onProgress(lines, _entries, bytes) {
-            set(s => {
-              const f = s.files[id]
-              if (!f || f.status === 'error') return s
-              return {
-                files: {
-                  ...s.files,
-                  [id]: { ...f, lines, fraction: f.size > 0 ? Math.min(1, bytes / f.size) : 0 },
-                },
-              }
-            })
-          },
-          onDone(lines) {
-            set(s => {
-              const f = s.files[id]
-              if (!f) return s
-              return {
-                files: {
-                  ...s.files,
-                  [id]: { ...f, status: 'ready', lines, fraction: 1, finishedAt: performance.now() },
-                },
-              }
-            })
-            sessions.delete(id)
-          },
-          onError(message) {
-            set(s => {
-              const f = s.files[id]
-              if (!f) return s
-              return {
-                files: {
-                  ...s.files,
-                  [id]: { ...f, status: 'error', error: message, finishedAt: performance.now() },
-                },
-              }
-            })
-            sessions.delete(id)
-          },
-        },
-          { tzMode: get().tzMode },
-        ),
-      )
-    }
+          activeId: s.activeId ?? id,
+        }))
+        sessions.set(
+          id,
+          startParse(
+            file,
+            {
+              onRows(rows) {
+                set(s => {
+                  const f = s.files[id]
+                  if (!f || f.status === 'error') return s
+                  return { files: { ...s.files, [id]: { ...f, entries: [...f.entries, ...rows] } } }
+                })
+              },
+              onProgress(lines, _entries, bytes) {
+                set(s => {
+                  const f = s.files[id]
+                  if (!f || f.status === 'error') return s
+                  return {
+                    files: {
+                      ...s.files,
+                      [id]: { ...f, lines, fraction: f.size > 0 ? Math.min(1, bytes / f.size) : 0 },
+                    },
+                  }
+                })
+              },
+              onDone(lines) {
+                set(s => {
+                  const f = s.files[id]
+                  if (!f) return s
+                  return {
+                    files: {
+                      ...s.files,
+                      [id]: { ...f, status: 'ready', lines, fraction: 1, finishedAt: performance.now() },
+                    },
+                  }
+                })
+                sessions.delete(id)
+              },
+              onError(message) {
+                set(s => {
+                  const f = s.files[id]
+                  if (!f) return s
+                  return {
+                    files: {
+                      ...s.files,
+                      [id]: { ...f, status: 'error', error: message, finishedAt: performance.now() },
+                    },
+                  }
+                })
+                sessions.delete(id)
+              },
+            },
+            { tzMode: get().tzMode },
+          ),
+        )
+      }
+    })()
   },
 
   removeFile(id) {
@@ -139,7 +186,11 @@ export const useLogStore = create<LogState>((set, get) => ({
   },
 
   setActive(id) {
-    set({ activeId: id })
+    set({ activeId: id, merged: false })
+  },
+
+  setMerged(on) {
+    set({ merged: on })
   },
 
   setText(text) {
