@@ -33,6 +33,7 @@ interface LogState {
   setText(text: string): void
   toggleLevel(level: LogLevel): void
   clearFilters(): void
+  setFilters(f: Filters): void
   setTzMode(mode: 'local' | 'utc'): void
 }
 
@@ -211,6 +212,10 @@ export const useLogStore = create<LogState>((set, get) => ({
 
   clearFilters() {
     set({ filters: EMPTY_FILTERS })
+  },
+
+  setFilters(f) {
+    set({ filters: f })
   },
 
   setTzMode(mode) {

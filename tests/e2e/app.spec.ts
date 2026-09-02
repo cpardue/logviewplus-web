@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { readFileSync } from 'node:fs'
 
 const FIXTURE = 'tests/fixtures/logs/mixed-levels.log'
 // Line count of the deterministic 10 MB fixture produced by `npm run gen:logs -- 10`.
@@ -122,6 +123,68 @@ test('pasted text drop ingests as a synthetic file', async ({ page }) => {
   expect(tabName).toMatch(/^tab-pasted-\d{8}-\d{6}\.log$/)
   await page.getByTestId('level-ERROR').click()
   await expect.poll(() => counts(page)).toEqual({ total: 2, visible: 1 })
+})
+
+test('saved filters persist in IndexedDB and reapply after reload', async ({ page }) => {
+  await page.goto('/')
+  let dialogHandled = false
+  page.on('dialog', d => {
+    dialogHandled = true
+    void d.accept('my filter')
+  })
+
+  await page.getByTestId('file-input').setInputFiles(FIXTURE)
+  await expect.poll(() => counts(page), { timeout: 20_000 }).toEqual({ total: 40, visible: 40 })
+  await page.getByTestId('level-WARN').click()
+  await page.getByTestId('text-filter').fill('config')
+  await expect.poll(() => counts(page)).toEqual({ total: 40, visible: 1 })
+
+  await page.getByTestId('save-filter').click()
+  await expect.poll(() => dialogHandled, { timeout: 5_000 }).toBe(true)
+
+  // Block until the put is committed: FilterBar only adds the dropdown option after
+  // saveFilter() resolves (awaited IDB put), so a reload below cannot race it.
+  await expect
+    .poll(() => page.getByTestId('saved-select').locator('option').count(), { timeout: 5_000 })
+    .toBe(2)
+
+  // Reload: runtime filter state is gone, but the saved set survives in IndexedDB.
+  await page.reload()
+  await page.getByTestId('file-input').setInputFiles(FIXTURE)
+  await expect.poll(() => counts(page), { timeout: 20_000 }).toEqual({ total: 40, visible: 40 })
+
+  // Applying the saved filter restores text + level and narrows to the one row.
+  await page.getByTestId('saved-select').selectOption('my filter')
+  await expect.poll(() => counts(page)).toEqual({ total: 40, visible: 1 })
+  await expect(page.getByTestId('text-filter')).toHaveValue('config')
+
+  // Deleting removes it from the persisted list (only the placeholder remains).
+  await page.getByTestId('delete-filter').click()
+  await expect
+    .poll(async () => (await page.getByTestId('saved-select').locator('option').count()))
+    .toBe(1)
+})
+
+test('export downloads the filtered rows as CSV and JSON', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('file-input').setInputFiles(FIXTURE)
+  await expect.poll(() => counts(page), { timeout: 20_000 }).toEqual({ total: 40, visible: 40 })
+  await page.getByTestId('level-WARN').click()
+  await expect.poll(() => counts(page)).toEqual({ total: 40, visible: 7 })
+
+  const [csv] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export-csv').click()])
+  expect(csv.suggestedFilename()).toBe('mixed-levels.log.csv')
+  const csvText = readFileSync(String(await csv.path()), 'utf8')
+  const csvLines = csvText.split('\n').filter(l => l !== '')
+  expect(csvLines[0]).toBe('ts_iso,ts_ms,level,message,raw,file,line_no')
+  expect(csvLines.length).toBe(8) // header + 7 WARN rows
+  expect(csvLines.slice(1).every(l => /,WARN,/.test(l))).toBe(true)
+
+  const [json] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export-json').click()])
+  expect(json.suggestedFilename()).toBe('mixed-levels.log.json')
+  const parsed = JSON.parse(readFileSync(String(await json.path()), 'utf8'))
+  expect(parsed).toHaveLength(7)
+  expect(parsed.every((r: { level?: string }) => r.level === 'WARN')).toBe(true)
 })
 
 test('perf: 10 MB file parses and fully paints in acceptable time', async ({ page }) => {

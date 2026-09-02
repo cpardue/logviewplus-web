@@ -4,6 +4,7 @@ import { applyFilters } from './lib/filters'
 import { pasteFileName, textToFile } from './lib/ingest'
 import Toolbar from './components/Toolbar'
 import FilterBar from './components/FilterBar'
+import ExportBar from './components/ExportBar'
 import LogGrid from './components/LogGrid'
 
 const EMPTY_ROWS: never[] = []
@@ -124,6 +125,7 @@ export default function App() {
         <Toolbar file={active} />
       )}
       <FilterBar />
+      <ExportBar rows={rows} label={merged ? 'all-files' : (active?.name ?? 'log')} />
       <section className="grid-wrap">
         {merged || active ? (
           <LogGrid rows={rows} fileId={merged ? 'all' : active!.id} showFile={merged} />

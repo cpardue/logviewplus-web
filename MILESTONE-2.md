@@ -19,7 +19,8 @@ clipboard, persist saved filters, and export filtered entries.
 4. **Zip / clipboard ingest** — drop/pick `.zip` (fflate), paste text,
    `navigator.clipboard.readText()` button. **DONE 2026-09-02.**
 5. **Saved filters + persistence** — named filter sets in IndexedDB (idb).
-6. **Export** — filtered rows to CSV or JSON (blob download).
+   **DONE 2026-09-02.**
+6. **Export** — filtered rows to CSV or JSON (blob download). **DONE 2026-09-02.**
 
 ## Tasks
 
@@ -33,8 +34,8 @@ clipboard, persist saved filters, and export filtered entries.
 3. **Merge view** — "All" tab, aggregate toolbar, File column.
 4. **Zip / clipboard** — fflate unzip to `File`s, text-paste dropzone path,
    clipboard button.
-5. **Saved filters** — `src/lib/db.ts` (idb), save/apply/delete in FilterBar.
-6. **Export** — CSV/JSON of the currently filtered rows.
+5. **Saved filters** — `src/lib/filters-db.ts` (idb), save/apply/delete in FilterBar. **DONE 2026-09-02.**
+6. **Export** — CSV/JSON of the currently filtered rows (`src/lib/export.ts` + `ExportBar`). **DONE 2026-09-02.**
 7. **Tests/docs** — new fixtures, unit tests per parser + detect, E2E for
    autodetect + merge + zip + export, perf re-check (10/100 MB), README.
 
@@ -49,14 +50,14 @@ clipboard, persist saved filters, and export filtered entries.
 
 ## Acceptance criteria (Definition of Done)
 
-- [ ] All gate commands green: lint / unit / build / e2e (incl. new specs)
-- [ ] Autodetect picks the right parser for every shipped fixture (unit-tested)
-- [ ] `%S`/`%s` specifiers + ordinal dates + tz mode covered by unit tests
-- [ ] Merge view shows all files with File column; E2E asserts combined counts
-- [ ] Zip drop and clipboard paste ingest parse into the grid (E2E where possible)
-- [ ] Saved filters survive a page reload (IndexedDB); E2E save/apply
-- [ ] Export CSV/JSON of filtered rows downloads with correct row count (E2E)
-- [ ] Perf re-check: 10 MB < 5 s gate still passes; numbers in `tests/perf.md`
+- [x] All gate commands green: lint / unit / build / e2e (incl. new specs)
+- [x] Autodetect picks the right parser for every shipped fixture (unit-tested)
+- [x] `%S`/`%s` specifiers + ordinal dates + tz mode covered by unit tests
+- [x] Merge view shows all files with File column; E2E asserts combined counts
+- [x] Zip drop and clipboard paste ingest parse into the grid (E2E where possible)
+- [x] Saved filters survive a page reload (IndexedDB); E2E save/apply
+- [x] Export CSV/JSON of filtered rows downloads with correct row count (E2E)
+- [x] Perf re-check: 10 MB < 5 s gate still passes; numbers in `tests/perf.md`
 - [ ] README updated; NEXT-STEPS §0 truthful; history entry written
 
 ## As-built notes (deviations from plan)
@@ -93,3 +94,18 @@ clipboard, persist saved filters, and export filtered entries.
   ("Naive times: Local/UTC" in the filter bar, localStorage `lvp.tzMode`)
   applied at parse time to every parser via the worker `init` message — files
   must be reopened after changing it.
+- **M2.5 (2026-09-02):** saved filters live in IndexedDB — DB `logviewplus-web`,
+  object store `saved-filters`, keyPath `name` (`src/lib/filters-db.ts` over
+  `idb`). FilterBar gets Save (name via `window.prompt`, stores the current
+  text + level set), a saved-filter dropdown (apply sets text + levels), and
+  Delete. E2E note: after accepting the prompt the test waits for the new
+  `<option>` to render before reloading — the option only appears after the
+  awaited IDB put commits, so the reload can no longer race ahead of the write
+  (the first version lost the record under machine load).
+- **M2.6 (2026-09-02):** ExportBar (one row in the toolbar; disabled at 0
+  visible rows) downloads the currently filtered rows via `src/lib/export.ts`:
+  CSV with header `ts_iso,ts_ms,level,message,raw,file,line_no` and RFC-4180
+  quoting, or a JSON array of the same fields — Blob + object-URL download.
+  Filename is `<active file>.csv|.json`, or `all-files.csv|.json` in merged
+  view. Exports reflect every active filter (text + level), never the raw
+  parse result.
