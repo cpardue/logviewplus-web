@@ -54,7 +54,18 @@ describe('compilePattern', () => {
     expect(() => compilePattern('plain text only')).toThrow(/no specifiers/i)
   })
 
-  it('exposes the four initial specifiers', () => {
-    expect(Object.keys(SPECIFIERS).sort()).toEqual(['%d', '%l', '%m', '%t'])
+  it('exposes the six initial specifiers', () => {
+    expect(Object.keys(SPECIFIERS).sort()).toEqual(['%S', '%d', '%l', '%m', '%s', '%t'])
+  })
+
+  it('compiles %S (syslog date) and %s (epoch) specifiers', () => {
+    const sys = compilePattern('%S %m')
+    const m = sys.regex.exec('Sep  1 08:02:33 host app[1]: msg')
+    expect(m?.[1]).toBe('Sep  1 08:02:33')
+    expect(m?.[2]).toBe('host app[1]: msg')
+    const ep = compilePattern('%s %l: %m')
+    const m2 = ep.regex.exec('1788220801 INFO: x')
+    expect(m2?.[1]).toBe('1788220801')
+    expect(m2?.[2]).toBe('INFO')
   })
 })

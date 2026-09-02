@@ -1,5 +1,5 @@
 import { normalizeLevel } from './levels'
-import { parseTimestamp } from './timestamps'
+import { parseTimestamp, type TsOptions } from './timestamps'
 import { rawDraft } from './rawDraft'
 import type { DraftEntry, LogParser } from './types'
 
@@ -28,6 +28,8 @@ function unescapeXml(s: string): string {
 export class XmlLog4jParser implements LogParser {
   readonly kind = 'log4j-xml' as const
   private buf = ''
+
+  constructor(private readonly tsOpts: TsOptions = {}) {}
 
   parse(line: string, lineNo: number): DraftEntry[] {
     this.buf += line + '\n'
@@ -105,7 +107,7 @@ export class XmlLog4jParser implements LogParser {
         const n = Number(attrs.timestamp)
         if (Number.isFinite(n)) ts = Math.round(n)
       } else if (attrs.Date != null) {
-        ts = parseTimestamp(attrs.Date)
+        ts = parseTimestamp(attrs.Date, this.tsOpts)
       }
     } else {
       // log4j 2: timeMillis attr, else instant/time ISO string.
@@ -114,7 +116,7 @@ export class XmlLog4jParser implements LogParser {
         if (Number.isFinite(n)) ts = Math.round(n)
       }
       if (ts == null && (attrs.instant != null || attrs.time != null)) {
-        ts = parseTimestamp(attrs.instant ?? attrs.time ?? '')
+        ts = parseTimestamp(attrs.instant ?? attrs.time ?? '', this.tsOpts)
       }
     }
 

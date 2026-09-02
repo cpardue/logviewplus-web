@@ -13,11 +13,16 @@ export interface ParseSession {
   close(): void
 }
 
+export interface ParseOptions {
+  /** How zone-less timestamps are interpreted while parsing this file. */
+  tzMode?: 'local' | 'utc'
+}
+
 /**
  * Orchestrate one file: parser autodetect from the first chunk, stream 1 MiB
  * text chunks into a parse worker, route results back via callbacks.
  */
-export function startParse(file: File, callbacks: ParseCallbacks): ParseSession {
+export function startParse(file: File, callbacks: ParseCallbacks, opts: ParseOptions = {}): ParseSession {
   const worker = new Worker(new URL('../workers/parser.worker.ts', import.meta.url), {
     type: 'module',
   })
@@ -54,7 +59,7 @@ export function startParse(file: File, callbacks: ParseCallbacks): ParseSession 
       if (closed) return
       if (!inited) {
         const spec: ParserSpec = detectFormat(text.split('\n').slice(0, 200))
-        worker.postMessage({ type: 'init', spec, fileName: file.name })
+        worker.postMessage({ type: 'init', spec, fileName: file.name, tzMode: opts.tzMode })
         inited = true
       }
       worker.postMessage({ type: 'chunk', text })

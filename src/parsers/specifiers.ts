@@ -1,7 +1,9 @@
 /** Date/time token union: ISO 8601 (T or space, optional fraction/Z/offset) | Apache CLF | short date+time. */
 const DATE_PATTERN =
   String.raw`\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})?` +
+  String.raw`|\d{4}-\d{3}(?:[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})?)?` +
   String.raw`|\d{2}/[A-Za-z]{3}/\d{4}:\d{2}:\d{2}:\d{2}(?: [+-]\d{4})?` +
+
   String.raw`|\d{1,2}[/-]\d{1,2}[/-]\d{2,4} \d{2}:\d{2}:\d{2}`
 
 export interface SpecifierDef {
@@ -17,6 +19,8 @@ export interface SpecifierDef {
  */
 export const SPECIFIERS: Record<string, SpecifierDef> = {
   '%d': { key: '%d', label: 'Date/Time', pattern: DATE_PATTERN },
+  '%S': { key: '%S', label: 'Syslog date (no year)', pattern: '[A-Za-z]{3} {1,2}\\d{1,2} \\d{2}:\\d{2}:\\d{2}' },
+  '%s': { key: '%s', label: 'Epoch seconds/ms', pattern: '\\d{9,16}(?:\\.\\d{1,9})?' },
   '%l': { key: '%l', label: 'Level', pattern: '[A-Za-z][A-Za-z]*' },
   '%t': { key: '%t', label: 'Thread', pattern: '[A-Za-z0-9_\\-\\.\\[\\]:]+' },
   '%m': { key: '%m', label: 'Message', pattern: '.*' },

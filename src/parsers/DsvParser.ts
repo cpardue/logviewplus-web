@@ -1,5 +1,5 @@
 import { normalizeLevel } from './levels'
-import { parseTimestamp } from './timestamps'
+import { parseTimestamp, type TsOptions } from './timestamps'
 import type { DraftEntry, LogParser, LogLevel } from './types'
 
 /**
@@ -15,6 +15,7 @@ export class DsvParser implements LogParser {
     private readonly delimiter: string,
     private readonly tsCol: number | null,
     private readonly levelCol: number | null,
+    private readonly tsOpts: TsOptions = {},
   ) {}
 
   parse(line: string, lineNo: number): DraftEntry[] {
@@ -22,7 +23,7 @@ export class DsvParser implements LogParser {
     const cells = line.split(this.delimiter)
 
     let ts: number | null = null
-    if (this.tsCol != null && this.tsCol < cells.length) ts = parseTimestamp(cells[this.tsCol])
+    if (this.tsCol != null && this.tsCol < cells.length) ts = parseTimestamp(cells[this.tsCol], this.tsOpts)
 
     let level: LogLevel | null = null
     if (this.levelCol != null && this.levelCol < cells.length) level = normalizeLevel(cells[this.levelCol])

@@ -1,5 +1,5 @@
 import { normalizeLevel } from './levels'
-import { parseTimestamp } from './timestamps'
+import { parseTimestamp, type TsOptions } from './timestamps'
 import { rawDraft } from './rawDraft'
 import type { DraftEntry, JsonKeys, LogParser, LogLevel } from './types'
 
@@ -16,7 +16,7 @@ const SYSLOG_NUM: Record<number, LogLevel> = {
 }
 
 /** Resolve a timestamp field value: ISO string, epoch seconds or ms (number/string). */
-export function resolveTs(v: unknown): number | null {
+export function resolveTs(v: unknown, opts: TsOptions = {}): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return v > 1e12 ? Math.round(v) : Math.round(v * 1000)
   if (typeof v === 'string') {
     const t = v.trim()
@@ -24,7 +24,7 @@ export function resolveTs(v: unknown): number | null {
       const n = Number(t)
       return n > 1e12 ? Math.round(n) : Math.round(n * 1000)
     }
-    return parseTimestamp(t)
+    return parseTimestamp(t, opts)
   }
   return null
 }
@@ -36,7 +36,7 @@ export function resolveTs(v: unknown): number | null {
 export class JsonLinesParser implements LogParser {
   readonly kind = 'json' as const
 
-  constructor(private readonly keys: JsonKeys) {}
+  constructor(private readonly keys: JsonKeys, private readonly tsOpts: TsOptions = {}) {}
 
   parse(line: string, lineNo: number): DraftEntry[] {
     const v = line.trim()
@@ -51,7 +51,7 @@ export class JsonLinesParser implements LogParser {
     const rec = obj as Record<string, unknown>
 
     let ts: number | null = null
-    if (this.keys.tsKey && this.keys.tsKey in rec) ts = resolveTs(rec[this.keys.tsKey])
+    if (this.keys.tsKey && this.keys.tsKey in rec) ts = resolveTs(rec[this.keys.tsKey], this.tsOpts)
 
     let level: LogLevel | null = null
     if (this.keys.levelKey && this.keys.levelKey in rec) {

@@ -1,5 +1,6 @@
 import { createParser } from '../parsers/factory'
 import type { LogEntry, LogParser, ParserSpec } from '../parsers/types'
+import type { TsOptions } from '../parsers/timestamps'
 
 export interface EngineStats {
   lines: number
@@ -29,12 +30,17 @@ export class ParseEngine {
     private readonly onBatch?: (rows: LogEntry[]) => void,
     private readonly batchLimit = 5000,
     private readonly fileName?: string,
+    private readonly tzMode?: 'local' | 'utc',
   ) {
-    this.parser = createParser(spec)
+    this.parser = createParser(spec, this.tsOpts())
   }
 
   setParser(spec: ParserSpec): void {
-    this.parser = createParser(spec)
+    this.parser = createParser(spec, this.tsOpts())
+  }
+
+  private tsOpts(): TsOptions {
+    return this.tzMode === 'utc' ? { naiveAsUtc: true } : {}
   }
 
   /** Feed one decoded text chunk (any size; '\n' separated). */

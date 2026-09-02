@@ -1,4 +1,4 @@
-import { parseTimestamp } from './timestamps'
+import { parseTimestamp, type TsOptions } from './timestamps'
 import { rawDraft } from './rawDraft'
 import type { DraftEntry, LogParser } from './types'
 import { levelFromStatus } from './W3cParser'
@@ -11,12 +11,14 @@ export const COMBINED_RE =
 export class CombinedParser implements LogParser {
   readonly kind = 'combined' as const
 
+  constructor(private readonly tsOpts: TsOptions = {}) {}
+
   parse(line: string, lineNo: number): DraftEntry[] {
     if (!line.trim()) return []
     const m = COMBINED_RE.exec(line)
     if (!m) return [rawDraft(line, lineNo)]
     const [, , , , dt, method, uri, proto, status] = m
-    const ts = parseTimestamp(dt)
+    const ts = parseTimestamp(dt, this.tsOpts)
     const level = levelFromStatus(status)
     const message = `${method} ${uri}${proto ? ` ${proto}` : ''} ${status}`
     return [{ ts, level, message, raw: line, lineNo }]

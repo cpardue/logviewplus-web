@@ -21,21 +21,35 @@ interface LogState {
   files: Record<string, FileState>
   activeId: string | null
   filters: Filters
+  /** How zone-less timestamps are interpreted while parsing (persisted). */
+  tzMode: 'local' | 'utc'
   addFiles(list: FileList | File[]): void
   removeFile(id: string): void
   setActive(id: string | null): void
   setText(text: string): void
   toggleLevel(level: LogLevel): void
   clearFilters(): void
+  setTzMode(mode: 'local' | 'utc'): void
 }
 
 const sessions = new Map<string, ParseSession>()
 let nextId = 1
 
-export const useLogStore = create<LogState>(set => ({
+const TZ_KEY = 'lvp.tzMode'
+
+function readTzMode(): 'local' | 'utc' {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem(TZ_KEY) === 'utc' ? 'utc' : 'local'
+  } catch {
+    return 'local'
+  }
+}
+
+export const useLogStore = create<LogState>((set, get) => ({
   files: {},
   activeId: null,
   filters: EMPTY_FILTERS,
+  tzMode: readTzMode(),
 
   addFiles(list) {
     for (const file of Array.from(list)) {
@@ -59,7 +73,9 @@ export const useLogStore = create<LogState>(set => ({
       }))
       sessions.set(
         id,
-        startParse(file, {
+        startParse(
+          file,
+          {
           onRows(rows) {
             set(s => {
               const f = s.files[id]
@@ -105,7 +121,9 @@ export const useLogStore = create<LogState>(set => ({
             })
             sessions.delete(id)
           },
-        }),
+        },
+          { tzMode: get().tzMode },
+        ),
       )
     }
   },
@@ -142,5 +160,14 @@ export const useLogStore = create<LogState>(set => ({
 
   clearFilters() {
     set({ filters: EMPTY_FILTERS })
+  },
+
+  setTzMode(mode) {
+    set({ tzMode: mode })
+    try {
+      localStorage.setItem(TZ_KEY, mode)
+    } catch {
+      // persistence is best-effort
+    }
   },
 }))

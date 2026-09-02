@@ -17,13 +17,19 @@ let engine: ParseEngine | null = null
 
 scope.onmessage = (ev: MessageEvent) => {
   const msg = ev.data as
-    | { type: 'init'; spec?: ParserSpec; fileName?: string }
+    | { type: 'init'; spec?: ParserSpec; fileName?: string; tzMode?: 'local' | 'utc' }
     | { type: 'chunk'; text: string }
     | { type: 'finish' }
 
   switch (msg.type) {
     case 'init':
-      engine = new ParseEngine(msg.spec, rows => scope.postMessage({ type: 'rows', rows }), 5000, msg.fileName)
+      engine = new ParseEngine(
+        msg.spec,
+        rows => scope.postMessage({ type: 'rows', rows }),
+        5000,
+        msg.fileName,
+        msg.tzMode,
+      )
       break
     case 'chunk':
       if (!engine) return

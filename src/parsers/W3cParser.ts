@@ -1,4 +1,4 @@
-import { parseTimestamp } from './timestamps'
+import { parseTimestamp, type TsOptions } from './timestamps'
 import { rawDraft } from './rawDraft'
 import type { DraftEntry, LogParser, LogLevel } from './types'
 
@@ -19,7 +19,7 @@ export class W3cParser implements LogParser {
   readonly kind = 'w3c' as const
   private readonly idx: Record<string, number> = {}
 
-  constructor(private readonly fields: string[]) {
+  constructor(private readonly fields: string[], private readonly tsOpts: TsOptions = {}) {
     fields.forEach((f, i) => {
       this.idx[f] = i
     })
@@ -43,7 +43,7 @@ export class W3cParser implements LogParser {
 
     const date = f('date')
     const time = f('time')
-    const ts = date != null && time != null ? parseTimestamp(`${date} ${time}`) : null
+    const ts = date != null && time != null ? parseTimestamp(`${date} ${time}`, this.tsOpts) : null
 
     const level = levelFromStatus(f('sc-status') ?? '')
 

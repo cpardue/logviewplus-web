@@ -29,7 +29,7 @@ clipboard, persist saved filters, and export filtered entries.
    `detectFormat()` replacing bare template autodetect; worker `init` carries a
    `ParserSpec`; engine stamps `entry.file`. **DONE 2026-09-02.**
 2. **Date rules** — `parseTimestamp` gains naive-timezone mode + ordinal dates;
-   `%S`/`%s` specifiers; year inference state for `%S`; UI timezone select.
+   `%S`/`%s` specifiers; year inference state for `%S`; UI timezone select. **DONE 2026-09-02.**
 3. **Merge view** — "All" tab, aggregate toolbar, File column.
 4. **Zip / clipboard** — fflate unzip to `File`s, text-paste dropzone path,
    clipboard button.
@@ -73,3 +73,14 @@ clipboard, persist saved filters, and export filtered entries.
   only accepted a bare offset); `DATE_PATTERN` and `CLF_RE` now capture the
   space + offset, so real offsets are honored. `specifiers.test.ts` updated to
   the corrected semantics.
+- **M2.2 (2026-09-02):** new specifiers `%S` (syslog date, no year) and `%s`
+  (epoch seconds/ms). `%S` year inference (PatternParser state): the last
+  full-year `%d` anchors the reference year; a resolution landing >48 h in the
+  future steps back one year, >355 d in the past steps forward one year — both
+  direction covers Dec→Jan and Jan←Dec wraps. `parseTimestamp` gains ISO
+  ordinal dates (`yyyy-DDD`, leap-year validated) and a `naiveAsUtc` option for
+  zone-less values (ISO-naive, CLF-without-offset, ordinal time-of-day);
+  explicit Z/offset always wins. The mode is a persisted UI setting
+  ("Naive times: Local/UTC" in the filter bar, localStorage `lvp.tzMode`)
+  applied at parse time to every parser via the worker `init` message — files
+  must be reopened after changing it.

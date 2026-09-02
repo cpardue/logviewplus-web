@@ -8,6 +8,8 @@ export default function FilterBar() {
   const setText = useLogStore(s => s.setText)
   const toggleLevel = useLogStore(s => s.toggleLevel)
   const clearFilters = useLogStore(s => s.clearFilters)
+  const tzMode = useLogStore(s => s.tzMode)
+  const setTzMode = useLogStore(s => s.setTzMode)
   const [text, setTextLocal] = useState('')
   const timer = useRef<number | undefined>(undefined)
 
@@ -40,6 +42,17 @@ export default function FilterBar() {
           </button>
         ))}
       </div>
+      <label className="tz" title="How timestamps without an explicit timezone are interpreted (applies to files opened after the change)">
+        Naive times
+        <select
+          data-testid="tz-select"
+          value={tzMode}
+          onChange={e => setTzMode(e.target.value === 'utc' ? 'utc' : 'local')}
+        >
+          <option value="local">Local</option>
+          <option value="utc">UTC</option>
+        </select>
+      </label>
       <button className="btn" disabled={!anyFilter} onClick={clearFilters}>
         Clear
       </button>
