@@ -19,3 +19,8 @@ dist
 tests/fixtures/logs/generated/
 _*.bak
 _play_*
+
+# Temp API/CI probes (must NEVER be committed — the API pusher stages every
+# untracked file that is not gitignored)
+_probe_*.mjs
+_probe_out.txt
