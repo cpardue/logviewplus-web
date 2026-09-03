@@ -6,6 +6,7 @@ import Toolbar from './components/Toolbar'
 import FilterBar from './components/FilterBar'
 import ExportBar from './components/ExportBar'
 import LogGrid from './components/LogGrid'
+import ReportBar from './components/ReportBar'
 
 const EMPTY_ROWS: never[] = []
 
@@ -18,6 +19,7 @@ export default function App() {
   const setActive = useLogStore(s => s.setActive)
   const setMerged = useLogStore(s => s.setMerged)
   const [dragOver, setDragOver] = useState(false)
+  const [view, setView] = useState<'logs' | 'report'>('logs')
   const inputRef = useRef<HTMLInputElement>(null)
 
   const fileIds = Object.keys(files)
@@ -34,6 +36,11 @@ export default function App() {
     if (merged) return allEntries.length > 0 ? applyFilters(allEntries, filters) : EMPTY_ROWS
     return active && active.status === 'ready' ? applyFilters(active.entries, filters) : EMPTY_ROWS
   }, [merged, allEntries, active, filters])
+  // Reports run over the raw parsed scope (active file or merged), unfiltered.
+  const scopeEntries = useMemo(() => {
+    if (merged) return allEntries
+    return active && active.status === 'ready' ? active.entries : []
+  }, [merged, allEntries, active])
 
   // Expose counts for E2E assertions (the row data actually fed to the grid).
   useEffect(() => {
@@ -77,8 +84,11 @@ export default function App() {
           {fileIds.length >= 2 && (
             <button
               data-testid="tab-all"
-              className={merged ? 'tab active' : 'tab'}
-              onClick={() => setMerged(!merged)}
+              className={merged && view === 'logs' ? 'tab active' : 'tab'}
+              onClick={() => {
+                setMerged(true)
+                setView('logs')
+              }}
             >
               All ({fileIds.length})
             </button>
@@ -87,13 +97,23 @@ export default function App() {
             <button
               key={id}
               data-testid={`tab-${files[id].name}`}
-              className={!merged && id === activeId ? 'tab active' : 'tab'}
-              onClick={() => setActive(id)}
+              className={!merged && id === activeId && view === 'logs' ? 'tab active' : 'tab'}
+              onClick={() => {
+                setActive(id)
+                setView('logs')
+              }}
             >
               {files[id].name}
               {files[id].status === 'parsing' ? ' …' : ''}
             </button>
           ))}
+          <button
+            data-testid="tab-report"
+            className={view === 'report' ? 'tab active' : 'tab'}
+            onClick={() => setView(v => (v === 'report' ? 'logs' : 'report'))}
+          >
+            Report
+          </button>
         </div>
         <button className="btn" onClick={() => inputRef.current?.click()}>
           Open files…
@@ -114,25 +134,31 @@ export default function App() {
           }}
         />
       </header>
-      {merged ? (
-        <div className="toolbar">
-          <span className="t-name">All files (merged)</span>
-          <span>
-            {fileIds.length} file{fileIds.length === 1 ? '' : 's'} · {allEntries.length.toLocaleString()} entries
-          </span>
-        </div>
+      {view === 'report' ? (
+        <ReportBar entries={scopeEntries} scopeLabel={merged ? 'all files (merged)' : (active?.name ?? 'log')} />
       ) : (
-        <Toolbar file={active} />
+        <>
+          {merged ? (
+            <div className="toolbar">
+              <span className="t-name">All files (merged)</span>
+              <span>
+                {fileIds.length} file{fileIds.length === 1 ? '' : 's'} · {allEntries.length.toLocaleString()} entries
+              </span>
+            </div>
+          ) : (
+            <Toolbar file={active} />
+          )}
+          <FilterBar />
+          <ExportBar rows={rows} label={merged ? 'all-files' : (active?.name ?? 'log')} />
+          <section className="grid-wrap">
+            {merged || active ? (
+              <LogGrid rows={rows} fileId={merged ? 'all' : active!.id} showFile={merged} />
+            ) : (
+              <div className="empty-hint">Drop log files here, or click “Open files…”</div>
+            )}
+          </section>
+        </>
       )}
-      <FilterBar />
-      <ExportBar rows={rows} label={merged ? 'all-files' : (active?.name ?? 'log')} />
-      <section className="grid-wrap">
-        {merged || active ? (
-          <LogGrid rows={rows} fileId={merged ? 'all' : active!.id} showFile={merged} />
-        ) : (
-          <div className="empty-hint">Drop log files here, or click “Open files…”</div>
-        )}
-      </section>
     </main>
   )
 }

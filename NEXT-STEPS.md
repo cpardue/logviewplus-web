@@ -3,8 +3,8 @@
 > **Read this first in every new session.** Companion docs: `PLAN.md`,
 > `MILESTONE-1.md`, `README.md`, `tests/perf.md`, and the history file at
 > `../history/logviewplus-web.md` (one level up, outside the repo).
-> Last updated: 2026-09-02 ~17:10 — M2 COMPLETE (all six areas done, gates green;
-> head `215d31f` + closeout docs push; next: M3).
+> Last updated: 2026-09-02 ~20:40 — M3 checkpoint A COMPLETE (DuckDB-WASM SQL
+> reporting + Report tab, gates green); next: M3 checkpoint B (tail-following).
 
 ## 0. Where we are (TL;DR)
 
@@ -25,9 +25,21 @@
   also dropped a stray `_test_out.txt` an earlier push had shipped) — plus this
   closeout docs commit on top. CI (Lint/Unit/Build + Pages deploy) runs on each
   push.
-- Next up: **M3** — DuckDB-WASM SQL reporting/dashboards (sql.js fallback per
-  PLAN.md), tail-following, and the 100 MB perf investigation item from
-  `tests/perf.md`.
+- **M3 checkpoint A COMPLETE — 2026-09-02**: DuckDB-WASM (stable pin `1.32.0`,
+  MVP worker build, lazy-loaded on first Run) over an Arrow-backed `entries`
+  table; Report tab with 4 presets + free-form SQL editor + AG Grid result
+  (50k-row cap, truncation flagged); status line with load/query timings and
+  errors. Verified by a new `tests/e2e/report.spec.ts` (preset counts against
+  `mixed-levels.log`, custom SQL, error surfacing + engine recovery, per-minute
+  grouping). Main bundle stays clean (no duckdb/arrow in initial payload;
+  wasm ~39 MB ships as a separate asset fetched on first Run). Caveats in
+  `MILESTONE-3.md` as-built notes: apache-arrow v17 Table-construction quirks
+  (all-nullable schema required) and the duckdb-wasm#1966 broken exception
+  shim that hides real SQL error text (mapper now detects it and explains).
+- Next up: **M3 checkpoint B** — tail-following (File System Access API,
+  Chromium-only, feature-detected), then checkpoint C (100 MB perf
+  investigation + closeout; `tests/perf.md` M3 section, README refresh,
+  history entries).
 
 ## 1. ~~Immediate task: enable Pages, verify live site~~ — DONE 2026-09-02
 
@@ -94,7 +106,7 @@ Steps actually taken (kept for reference):
 
 ```
 npm run lint
-npm test                      # 36 unit tests, ~0.5 s
+npm test                      # 122 unit tests, ~1 s
 npm run build                 # tsc -b && vite build → dist/
 npm run gen:logs -- 10        # deterministic fixtures (seeded; 10MB=139769 lines, 100MB=1397688)
 npm run build                 # REQUIRED before e2e (playwright webServer serves dist via vite preview)
