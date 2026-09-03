@@ -10,14 +10,17 @@ Intended for personal/internal use (GitHub Pages ToS prohibits commercial SaaS).
 
 ## Status
 
-**Milestone 4 in progress (2026-09-03):** checkpoints A + B done — **Watch
-folder…**: a live directory monitor (File System Access API, Chromium-only,
-feature-detected) that ingests and tail-follows new log files as they appear
-in the picked folder; removed files keep their rows. Plus **rules & row
-coloring**: user-defined text / level / file match rules color grid rows
+**Milestone 4 in progress (2026-09-03):** checkpoints A + B + C done —
+**Watch folder…**: a live directory monitor (File System Access API,
+Chromium-only, feature-detected) that ingests and tail-follows new log files
+as they appear in the picked folder; removed files keep their rows. **Rules &
+row coloring**: user-defined text / level / file match rules color grid rows
 (first matching rule wins, overrides the built-in level tints), persisted in
-IndexedDB across reloads. Remaining M4: highlights/bookmarks/notes, workspace
-archive, local `.sqlite` open, webhook notifications (see `MILESTONE-4.md`).
+IndexedDB across reloads. **Highlights/bookmarks/notes**: right-click any grid
+row to pin it with a note (accent bar + NotesBar entry with file:line,
+editable text and jump-to-row); pins persist across reloads and follow their
+row into the merged view. Remaining M4: workspace archive save/share, local
+`.sqlite` open, webhook notifications (see `MILESTONE-4.md`).
 
 **Milestone 3 complete (2026-09-03):** on top of M2 — a Report tab with real
 SQL over the parsed entries (DuckDB-WASM in a worker, lazily loaded on first
@@ -37,7 +40,7 @@ CSV/JSON export of the filtered rows.
 - `MILESTONE-1.md` — M1 tasks + acceptance criteria (done)
 - `MILESTONE-2.md` — M2 tasks + acceptance criteria (done)
 - `MILESTONE-3.md` — M3 tasks + acceptance criteria (done)
-- `MILESTONE-4.md` — M4 power features: tasks, checkpoint A as-built, limitations
+- `MILESTONE-4.md` — M4 power features: tasks, checkpoints A–C as-built, limitations
 - `tests/perf.md` — measured performance numbers (M1, M2 re-check, M3 closeout)
 
 ## Usage
@@ -49,7 +52,10 @@ file you get: name, size, live parse progress, entries/lines + elapsed time;
 Time / Level / Message (+ File in merged view) columns with level row
 coloring — plus **rules** that color rows by text / level / file name match
 (each rule ANDs its conditions; the first matching rule wins and overrides the
-level tints; rules persist across reloads); a case-insensitive text filter and
+level tints; rules persist across reloads); **pinned notes** — right-click a
+row to pin it with an optional note (accent bar + NotesBar entry with file:line,
+editable text and a jump-to-row button; pins persist across reloads and follow
+the row into the merged view); a case-insensitive text filter and
 level chips that apply to the parsed data without re-parsing; saved filter
 sets persisted in IndexedDB; CSV/JSON export of the filtered rows; and a
 "Naive times: Local/UTC" setting for zone-less timestamps. On top of that: a **Report** tab (SQL over the
@@ -90,8 +96,8 @@ Details, verdict on the M2 drift, and how to reproduce: `tests/perf.md`.
 - Naive timestamps (no timezone) follow the "Naive times" setting (default
   Local); changing it only affects files opened afterwards — already-opened
   files must be reopened.
-- Saved filters and row-coloring rules are stored per browser profile in
-  IndexedDB (client-side only; clearing site data clears them).
+- Saved filters, row-coloring rules, and pinned notes are stored per browser
+  profile in IndexedDB (client-side only; clearing site data clears them).
 - Memory ≈ 1 GB heap at 100 MB / 1.4M rows — practical ceiling ~500 MB files
   before columnar/typed-array storage (M5 perf pass; see `tests/perf.md` for
   the M3 bottleneck breakdown).

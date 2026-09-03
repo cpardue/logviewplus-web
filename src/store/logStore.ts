@@ -7,6 +7,8 @@ import { HandleSource, type TailSource } from '../lib/tail'
 import { ingestZip } from '../lib/ingest'
 import { loadRules, saveRules } from '../lib/rules-db'
 import type { Rule } from '../lib/rules'
+import { loadHighlights, saveHighlight, deleteHighlight } from '../lib/highlights-db'
+import { makeHighlight, type Highlight } from '../lib/highlights'
 
 export interface FileState {
   id: string
@@ -41,6 +43,8 @@ interface LogState {
   dirName: string | null
   /** Row-coloring rules, ordered by priority (first match wins). Persisted. */
   rules: Rule[]
+  /** Pinned rows with notes (exact file + lineNo identity). Persisted. */
+  highlights: Highlight[]
   addFiles(list: FileList | File[]): void
   /** Start tail-following a File System Access API handle (Chromium only). */
   startTail(handle: FileSystemFileHandle): void
@@ -58,6 +62,12 @@ interface LogState {
   setTzMode(mode: 'local' | 'utc'): void
   /** Replace the rule list (persists to IndexedDB). */
   setRules(rules: Rule[]): void
+  /** Pin a row with an empty note (no-op when already pinned); persists. */
+  pinRow(entry: LogEntry): void
+  /** Replace a pin's note text; persists. */
+  setHighlightNote(id: string, note: string): void
+  /** Remove a pin; persists. */
+  unpinRow(id: string): void
 }
 
 const sessions = new Map<string, ParseSession>()
@@ -247,6 +257,7 @@ export const useLogStore = create<LogState>((set, get) => ({
   merged: false,
   dirName: null,
   rules: [],
+  highlights: [],
 
   addFiles(list) {
     void (async () => {
@@ -454,8 +465,43 @@ export const useLogStore = create<LogState>((set, get) => ({
         // DB unavailable — rules still apply for this session.
       })
   },
+
+  pinRow(entry) {
+    const file = entry.file ?? ''
+    if (get().highlights.some(h => h.file === file && h.lineNo === entry.lineNo)) return
+    const h = makeHighlight(file, entry.lineNo)
+    set(s => ({ highlights: [...s.highlights, h] }))
+    void persistHighlight(() => saveHighlight(h))
+  },
+
+  setHighlightNote(id, note) {
+    const cur = get().highlights.find(x => x.id === id)
+    if (!cur || cur.note === note) return
+    const next = { ...cur, note }
+    set(s => ({ highlights: s.highlights.map(x => (x.id === id ? next : x)) }))
+    void persistHighlight(() => saveHighlight(next))
+  },
+
+  unpinRow(id) {
+    set(s => ({ highlights: s.highlights.filter(x => x.id !== id) }))
+    void persistHighlight(() => deleteHighlight(id))
+  },
 }))
+
+/** Fire-and-forget IDB write with the E2E commit marker; session state never blocks. */
+function persistHighlight(write: () => Promise<void>): void {
+  void write()
+    .then(() => {
+      // Test hook: E2E waits on this commit marker before reloading the page.
+      ;(window as unknown as { __highlightsSavedAt?: number }).__highlightsSavedAt = Date.now()
+    })
+    .catch(() => {
+      // DB unavailable — pins still apply for this session.
+    })
+}
 
 // Restore the persisted rule set at startup. IndexedDB is async, so rules may
 // arrive after the first render — LogGrid redraws its rows when they land.
 void loadRules().then(rules => useLogStore.setState({ rules }))
+// Same for pinned notes (grid redraw picks them up on arrival).
+void loadHighlights().then(highlights => useLogStore.setState({ highlights }))

@@ -85,9 +85,28 @@ test('file rule colors only rows from that source in the merged view', async ({ 
   await page.getByTestId('rules-add').click()
   await page.locator('[data-testid^="rule-file-"]').fill('mixed')
 
-  // The whole 58-row dataset is rendered in the DOM for this fixture/viewport,
-  // so every mixed-levels.log row (40) carries the rule color and none of the
-  // 18 iis-u_ex.log rows do.
+  // The grid virtualizes rows (only a viewport window is in the DOM), so count
+  // at model level via the grid API: every mixed-levels.log row (40) matches
+  // the file rule and none of the 18 iis-u_ex.log rows do.
+  await expect
+    .poll(async () => {
+      return page.evaluate(() => {
+        const api = (window as unknown as {
+          __gridApi?: { forEachNode?: (cb: (n: { data?: { file?: string } }) => void) => void }
+        }).__gridApi
+        let mixed = 0
+        let iis = 0
+        api?.forEachNode?.(node => {
+          if (node.data?.file === 'mixed-levels.log') mixed++
+          else if (node.data?.file === 'iis-u_ex.log') iis++
+        })
+        return `${mixed}/${iis}`
+      })
+    })
+    .toBe('40/18')
+
+  // …and rendered rows actually carry the rule color (grid starts at the top,
+  // where all visible rows are mixed-levels.log).
   await expect
     .poll(async () => {
       return page.evaluate(
@@ -98,9 +117,26 @@ test('file rule colors only rows from that source in the merged view', async ({ 
         RED,
       )
     })
-    .toBe(40)
+    .toBeGreaterThan(0)
 
-  // An INFO row from the other source stays uncolored.
+  // An INFO row from the other source stays uncolored (scroll it into existence).
+  const iisRow = await page.evaluate(() => {
+    const api = (window as unknown as {
+      __gridApi?: { forEachNode?: (cb: (n: { data?: { message?: string }; rowIndex: number | null }) => void) => void }
+    }).__gridApi
+    let idx: number | null = null
+    api?.forEachNode?.(n => {
+      if (idx === null && n.data?.message?.includes('static/app.js')) idx = n.rowIndex
+    })
+    return idx
+  })
+  expect(iisRow).not.toBeNull()
+  await page.evaluate(i => {
+    const api = (window as unknown as {
+      __gridApi?: { ensureIndexVisible?: (i: number, p?: string) => void }
+    }).__gridApi
+    if (typeof i === 'number') api?.ensureIndexVisible?.(i, 'middle')
+  }, iisRow)
   await expect.poll(() => rowBg(page, 'static/app.js')).toBe('')
 })
 

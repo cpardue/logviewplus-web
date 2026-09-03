@@ -3,10 +3,11 @@
 > **Read this first in every new session.** Companion docs: `PLAN.md`,
 > `MILESTONE-1.md`, `README.md`, `tests/perf.md`, and the history file at
 > `../history/logviewplus-web.md` (one level up, outside the repo).
-> Last updated: 2026-09-03 ~10:50 — **M4 in progress**: checkpoints A + B
+> Last updated: 2026-09-03 ~15:10 — **M4 in progress**: checkpoints A + B + C
 > DONE (directory monitor; rules & row coloring — persisted user rules →
-> grid row colors, first match wins; gates green incl. perf re-run); next: M4
-> checkpoint C (highlights/bookmarks/notes), see `MILESTONE-4.md`.
+> grid row colors, first match wins; highlights/bookmarks/notes — right-click
+> pin + note, persisted → accent bar + NotesBar, exact file:line identity);
+> next: M4 checkpoint D (workspace archive save/share), see `MILESTONE-4.md`.
 
 ## 0. Where we are (TL;DR)
 
@@ -104,11 +105,28 @@
   (21 files) / build / 23 e2e (+2 perf skips); perf re-run after the change:
   10 MB 629 ms, 100 MB 4.36 s — no regression (M4-A 608 ms / 4.36 s). Full
   notes + limitations in `MILESTONE-4.md`.
-- Next up: **M4 checkpoint C — highlights/bookmarks/notes** (pin a row with a
-  note; IndexedDB persistence), then D workspace archive save/share, E local
-  `.sqlite` open (sql.js), F webhook notifications + closeout — per
-  `MILESTONE-4.md`. Then M5 polish (encodings/culture, 1 GB+ perf pass:
-  main-thread decode move + columnar storage per `tests/perf.md`, a11y, docs).
+- **M4 checkpoint C COMPLETE — 2026-09-03**: highlights/bookmarks/notes.
+  `src/lib/highlights.ts` = DOM-free pin model (identity = exact
+  engine-stamped `(file, lineNo)` pair; `sanitizeHighlights` for corrupt IDB
+  records). Right-click a grid row → "Add note…" context menu (`LogGrid`
+  `onCellContextMenu` — robust under virtualization) pins the row: left accent
+  bar (`inset 3px #ffd75e`, composes with rule/level colors) + a `NotesBar`
+  entry (file:line, editable note, → jump via `src/lib/gridJump.ts`
+  `ensureIndexVisible`, ✕ delete). Pins follow their row across tabs and the
+  merged view, auto-save to a new IndexedDB `highlights` store (shared DB
+  v2 → v3, contains()-guarded) and restore at startup; a
+  `__highlightsSavedAt` marker lets E2E wait out the IDB put. New
+  `tests/unit/highlights.test.ts` (10 tests) + `tests/e2e/highlights.spec.ts`
+  (5 specs: pin + accent, remove restores coloring, reload persistence,
+  merged-view identity, jump scroll). Gates: lint / 161 unit (22 files) /
+  build / 30 e2e incl. both perf gates — 10 MB 501 ms, 100 MB 4184 ms — no
+  regression (M4-B 629/4364). Full notes + limitations in `MILESTONE-4.md`.
+- Next up: **M4 checkpoint D — workspace archive save/share** (bundle session
+  state — saved filters, rules, pinned notes, metadata — into a downloadable
+  archive that can be re-opened), then E local `.sqlite` open (sql.js), F
+  webhook notifications + closeout — per `MILESTONE-4.md`. Then M5 polish
+  (encodings/culture, 1 GB+ perf pass: main-thread decode move + columnar
+  storage per `tests/perf.md`, a11y, docs).
 
 ## 1. ~~Immediate task: enable Pages, verify live site~~ — DONE 2026-09-02
 
@@ -175,17 +193,17 @@ Steps actually taken (kept for reference):
 
 ```
 npm run lint
-npm test                      # 139 unit tests (20 files), ~1 s
+npm test                      # 161 unit tests (22 files), ~1.3 s
 npm run build                 # tsc -b && vite build → dist/
 npm run gen:logs -- 10        # deterministic fixtures (seeded; 10MB=139769 lines, 100MB=1397688)
 npm run build                 # REQUIRED before e2e (playwright webServer serves dist via vite preview)
-npm run test:e2e              # 18 tests: app/merge/zip/paste/saved-filters/export/report/tail/dir chains + (PERF-gated) perf
-$env:PERF='1'; $env:PERF_100='1'; npx playwright test   # 20 incl. both perf gates (~14 s on a quiet pass)
+npm run test:e2e              # 28 tests: app/merge/zip/paste/saved-filters/export/report/tail/dir/rules/highlights chains + (PERF-gated) perf
+$env:PERF='1'; $env:PERF_100='1'; npx playwright test   # 30 incl. both perf gates (~15 s on a quiet pass)
 ```
 
 - Chromium is already installed (`npx playwright install chromium` if a fresh
   Playwright version demands re-download).
-- Expected: unit 139/139; E2E counts 40 → (WARN) 7 → (+“config”) 1; dir spec
+- Expected: unit 161/161; E2E counts 40 → (WARN) 7 → (+“config”) 1; dir spec
   All-view total 15 (10+5 entries); perf 10 MB < 5 s gate, 100 MB completes +
   scroll check (~4.5 s measured on this machine, 2026-09-03).
 - Quick API checks without a probe file: use MCP `github__get_repo` for repo
@@ -248,7 +266,11 @@ over an Arrow `entries` table), `src/store/reportStore.ts`,
 pipeline + worker `reset`/epoch protocol), and `tests/e2e/{report,tail}.spec.ts`;
 M4-A added `src/lib/dirWatch.ts` (+ `startDirMonitor` in pipeline, store
 `dirName`/`startDirMonitor`/`stopDirMonitor`, `beginTail`/`detachTail` refactor)
-and `tests/{unit/dirWatch.test.ts, e2e/dir.spec.ts}`
+and `tests/{unit/dirWatch.test.ts, e2e/dir.spec.ts}`; M4-B added
+`src/lib/{rules,rules-db}.ts` + `src/components/RulesBar.tsx` (+ `src/lib/db.ts`
+shared IDB open); M4-C added `src/lib/{highlights,highlights-db,gridJump}.ts`,
+`src/components/NotesBar.tsx`, DB v2 → v3, the right-click context menu + accent
+bar in `LogGrid.tsx`, and `tests/{unit/highlights.test.ts, e2e/highlights.spec.ts}`
 
 ```
 src/parsers/        pure parser core: types.ts, levels.ts, timestamps.ts,

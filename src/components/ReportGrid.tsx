@@ -30,7 +30,7 @@ export default function ReportGrid({ columns, rows }: Props) {
   }, [columns])
 
   return (
-    <div className="grid">
+    <div className="grid ag-theme-alpine-dark">
       <AgGridReact<Row>
         columnDefs={colDefs}
         rowData={rowData}

@@ -30,7 +30,7 @@ rules & row coloring, workspace archive save/share, and webhook notifications
 2. **Checkpoint B — Rules & row coloring** (`src/lib/rules.ts` pure evaluation
    layer + IndexedDB persistence, `RulesBar` UI, AG Grid `getRowStyle`
    integration) — DONE 2026-09-03 (as-built notes below).
-3. Checkpoint C — highlights/bookmarks/notes.
+3. Checkpoint C — highlights/bookmarks/notes — DONE 2026-09-03 (as-built notes below).
 4. Checkpoint D — workspace archive save/share.
 5. Checkpoint E — local `.sqlite` open (sql.js).
 6. Checkpoint F — webhook notifications + closeout (README refresh,
@@ -40,7 +40,7 @@ rules & row coloring, workspace archive save/share, and webhook notifications
 
 - [x] A — directory monitor (2026-09-03)
 - [x] B — rules & row coloring (2026-09-03)
-- [ ] C — highlights/bookmarks/notes
+- [x] C — highlights/bookmarks/notes (2026-09-03)
 - [ ] D — workspace archive save/share
 - [ ] E — local `.sqlite` open (sql.js)
 - [ ] F — webhook notifications + closeout
@@ -57,6 +57,11 @@ rules & row coloring, workspace archive save/share, and webhook notifications
   built-in level tints; reordering changes priority; the working set persists
   across reloads (IndexedDB); deleting restores built-in coloring. — MET
   2026-09-03.
+- Checkpoint C: right-clicking a grid row pins it with an accent bar and a
+  note entry (exact file:line identity, editable text); the pin follows its
+  row across tabs and the merged "All" view; the jump button scrolls a pinned
+  row into view; pins persist across reloads (IndexedDB); unpinning restores
+  the plain coloring. — MET 2026-09-03.
 - Remaining criteria to be defined per checkpoint as work starts.
 
 ## As-built notes
@@ -156,7 +161,50 @@ rules & row coloring, workspace archive save/share, and webhook notifications
   (+2 perf skips) incl. the 5 new rules specs; perf re-check after the change:
   10 MB 629 ms / 100 MB 4.36 s — no regression (M4-A baseline 608 ms / 4.36 s).
 
-## Known limitations (M4-A/B; deferred to later checkpoints / M5)
+### Checkpoint C (highlights/bookmarks/notes)
+
+- **Identity = exact (file, lineNo) pair:** `src/lib/highlights.ts`
+  (DOM-free): `Highlight { id, file, lineNo, note }`; `highlightFor` matches
+  the engine-stamped `entry.file` + 1-based `lineNo`, so a pin follows its row
+  across single-file tabs and the merged view and never leaks to a same-line
+  row in another file. `sanitizeHighlights` drops corrupt/stale IDB records
+  (same class as `sanitizeRules`).
+- **Accent bar composes with colors:** `LogGrid.getRowStyle` adds
+  `boxShadow: inset 3px 0 0 #ffd75e` on top of whatever rule/level background
+  the row already has — pins are independent of rules and level tints (the
+  e2e asserts the ERROR tint survives underneath). Same visible-window
+  `redrawRows()` effect as rules, so pin edits stay cheap at 1.4M rows.
+- **Right-click context menu:** the native contextmenu over `.ag-row` is
+  suppressed (capture phase); the grid's `onCellContextMenu` (carries the
+  RowNode → robust under virtualization, where only a window of rows is in
+  the DOM) opens a fixed-position menu with "Add note…" / "Remove note"
+  (`ctx-pin`/`ctx-unpin` testids); Escape or grid scrolling closes it.
+- **NotesBar** (one row per pin under RulesBar): `file:line` location,
+  editable note textarea (auto-focuses the freshly added pin's field), → jump
+  button, ✕ delete; empty state hints "right-click a grid row to pin one".
+- **Jump** (`src/lib/gridJump.ts`): best effort — finds the row by identity
+  via `forEachNode`, `setHighlighted('center')` + `ensureIndexVisible`; no-op
+  (returns false) when there is no grid or the row is not in the currently
+  shown model (source file closed or filtered out).
+- **Persistence:** new `highlights` object store (keyPath `id`) — shared DB
+  open in `src/lib/db.ts` bumped v2 → v3, contains()-guarded so fresh and
+  v1/v2 databases all upgrade cleanly. Store actions `pinRow` /
+  `setHighlightNote` / `unpinRow` auto-save fire-and-forget; a
+  `window.__highlightsSavedAt` commit marker lets E2E wait out the IDB put
+  before reloading; pins restore at startup (they may land after the first
+  grid render — the redraw effect re-applies them).
+- **E2E** (`tests/e2e/highlights.spec.ts`, 5 specs): right-click pin →
+  `file:line` entry + accent bar while non-pinned rows stay clean; a pinned
+  row offers Remove note and removing restores the plain coloring (accent
+  composes with, not replaces, the ERROR tint); persistence across reload; a
+  pin follows its row into the merged view (exactly one accented row among
+  58 — identity includes the file name); the jump button scrolls a deep row
+  into the grid viewport. Unit: 10 tests in `tests/unit/highlights.test.ts`.
+- **Gates:** lint clean; unit 161/161 (22 files, +10); build ok; e2e 30
+  tests incl. both perf gates — 10 MB 501 ms / 100 MB 4184 ms — no regression
+  (M4-B baseline 629 ms / 4.36 s).
+
+## Known limitations (M4-A/B/C; deferred to later checkpoints / M5)
 
 - Top-level files only — no recursive subdirectory watch (per-subdir sessions
   would be the natural extension).
@@ -170,3 +218,8 @@ rules & row coloring, workspace archive save/share, and webhook notifications
   supports several; a multi-select would be the extension). Row-coloring rules
   persist per browser profile in IndexedDB like saved filters — moving them to
   another machine is the workspace-archive job (checkpoint D).
+- Pins key on (file name, lineNo) — the same pre-existing duplicate-name
+  collision as tabs: two tabs opened from same-named files share pin identity.
+  A pin outlives its source file (the note entry stays until deleted; the jump
+  button becomes a no-op). One accent color for all pins — no per-pin colors,
+  and notes attach to whole rows, not text spans.
