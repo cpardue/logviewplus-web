@@ -7,8 +7,18 @@ import { HandleSource, type TailSource } from '../lib/tail'
 import { ingestZip } from '../lib/ingest'
 import { loadRules, saveRules } from '../lib/rules-db'
 import type { Rule } from '../lib/rules'
-import { loadHighlights, saveHighlight, deleteHighlight } from '../lib/highlights-db'
+import { loadHighlights, saveHighlight, deleteHighlight, replaceHighlights } from '../lib/highlights-db'
 import { makeHighlight, type Highlight } from '../lib/highlights'
+import { listSavedFilters, saveFilter, type SavedFilter } from '../lib/filters-db'
+import { downloadBlob } from '../lib/export'
+import {
+  WorkspaceError,
+  buildWorkspace,
+  mergeHighlights,
+  parseWorkspace,
+  workspaceToJson,
+  type WorkspaceArchive,
+} from '../lib/workspace'
 
 export interface FileState {
   id: string
@@ -45,6 +55,8 @@ interface LogState {
   rules: Rule[]
   /** Pinned rows with notes (exact file + lineNo identity). Persisted. */
   highlights: Highlight[]
+  /** Bumped by workspace-archive loads so the FilterBar refreshes its saved sets. */
+  savedFiltersVersion: number
   addFiles(list: FileList | File[]): void
   /** Start tail-following a File System Access API handle (Chromium only). */
   startTail(handle: FileSystemFileHandle): void
@@ -68,6 +80,14 @@ interface LogState {
   setHighlightNote(id: string, note: string): void
   /** Remove a pin; persists. */
   unpinRow(id: string): void
+  /** Bundle session state into a downloadable workspace archive (checkpoint D). */
+  saveWorkspace(): Promise<void>
+  /**
+   * Restore a workspace archive: rules REPLACED, pins + saved filters MERGED
+   * (archive wins on collisions), active filter + tz mode applied. Throws
+   * {@link WorkspaceError} with a user-facing message on unreadable/invalid input.
+   */
+  loadWorkspace(file: File): Promise<void>
 }
 
 const sessions = new Map<string, ParseSession>()
@@ -258,6 +278,11 @@ export const useLogStore = create<LogState>((set, get) => ({
   dirName: null,
   rules: [],
   highlights: [],
+  /**
+   * Bumped when the saved-filter set can have changed from outside FilterBar
+   * (a workspace-archive load) so the bar re-reads IndexedDB.
+   */
+  savedFiltersVersion: 0,
 
   addFiles(list) {
     void (async () => {
@@ -485,6 +510,58 @@ export const useLogStore = create<LogState>((set, get) => ({
   unpinRow(id) {
     set(s => ({ highlights: s.highlights.filter(x => x.id !== id) }))
     void persistHighlight(() => deleteHighlight(id))
+  },
+
+  async saveWorkspace() {
+    const st = get()
+    let savedFilters: SavedFilter[] = []
+    try {
+      savedFilters = await listSavedFilters()
+    } catch {
+      // DB unavailable — export what is in memory (rules/highlights/filters).
+    }
+    const archive = buildWorkspace({
+      filters: st.filters,
+      tzMode: st.tzMode,
+      savedFilters,
+      rules: st.rules,
+      highlights: st.highlights,
+      files: Object.values(st.files).map(f => ({
+        name: f.name,
+        size: f.size,
+        lines: f.lines,
+        entries: f.entries.length,
+        status: f.status,
+      })),
+    })
+    downloadBlob(workspaceToJson(archive), 'logviewplus-workspace.json', 'application/json')
+  },
+
+  async loadWorkspace(file) {
+    let text: string
+    try {
+      text = await file.text()
+    } catch {
+      throw new WorkspaceError('Could not read the archive file.')
+    }
+    let archive: WorkspaceArchive
+    try {
+      archive = parseWorkspace(JSON.parse(text))
+    } catch (err) {
+      if (err instanceof WorkspaceError) throw err
+      throw new WorkspaceError('Not a valid workspace archive (invalid JSON).')
+    }
+    // Every write is awaited before the commit marker (E2E waits on it).
+    get().setFilters(archive.filters)
+    get().setTzMode(archive.settings.tzMode)
+    await saveRules(archive.rules) // the working set is a snapshot → replace
+    set({ rules: archive.rules })
+    for (const f of archive.savedFilters) await saveFilter(f) // upsert by name; archive wins
+    const merged = mergeHighlights(get().highlights, archive.highlights)
+    await replaceHighlights(merged)
+    // FilterBar only re-reads its saved-filter list when this bumps.
+    set(s => ({ highlights: merged, savedFiltersVersion: s.savedFiltersVersion + 1 }))
+    ;(window as unknown as { __workspaceLoadedAt?: number }).__workspaceLoadedAt = Date.now()
   },
 }))
 

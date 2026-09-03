@@ -20,3 +20,16 @@ export async function deleteHighlight(id: string): Promise<void> {
   const d = await db()
   await d.delete(STORE, id)
 }
+
+/**
+ * Replace the full pin set in one transaction (workspace-archive load merges
+ * into the whole local set; pin counts are small enough that clear+put is
+ * cheaper than diffing keys).
+ */
+export async function replaceHighlights(all: Highlight[]): Promise<void> {
+  const d = await db()
+  const tx = d.transaction(STORE, 'readwrite')
+  tx.objectStore(STORE).clear()
+  for (const h of all) tx.objectStore(STORE).put(h)
+  await tx.done
+}

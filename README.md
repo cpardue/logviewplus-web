@@ -10,7 +10,7 @@ Intended for personal/internal use (GitHub Pages ToS prohibits commercial SaaS).
 
 ## Status
 
-**Milestone 4 in progress (2026-09-03):** checkpoints A + B + C done —
+**Milestone 4 in progress (2026-09-03):** checkpoints A + B + C + D done —
 **Watch folder…**: a live directory monitor (File System Access API,
 Chromium-only, feature-detected) that ingests and tail-follows new log files
 as they appear in the picked folder; removed files keep their rows. **Rules &
@@ -19,7 +19,11 @@ row coloring**: user-defined text / level / file match rules color grid rows
 IndexedDB across reloads. **Highlights/bookmarks/notes**: right-click any grid
 row to pin it with a note (accent bar + NotesBar entry with file:line,
 editable text and jump-to-row); pins persist across reloads and follow their
-row into the merged view. Remaining M4: workspace archive save/share, local
+row into the merged view. **Workspace archive**: Save/Load workspace… bundles
+saved filters, rules, pinned notes, the active filter, the naive-timestamp
+mode and per-file metadata into one JSON file that re-applies in the same or
+another profile/machine (rules replaced, pins + saved filters merged — files
+themselves are re-opened). Remaining M4: local
 `.sqlite` open, webhook notifications (see `MILESTONE-4.md`).
 
 **Milestone 3 complete (2026-09-03):** on top of M2 — a Report tab with real
@@ -57,7 +61,10 @@ row to pin it with an optional note (accent bar + NotesBar entry with file:line,
 editable text and a jump-to-row button; pins persist across reloads and follow
 the row into the merged view); a case-insensitive text filter and
 level chips that apply to the parsed data without re-parsing; saved filter
-sets persisted in IndexedDB; CSV/JSON export of the filtered rows; and a
+sets persisted in IndexedDB; CSV/JSON export of the filtered rows; a **workspace archive** (Save/Load
+workspace… — one JSON file carrying saved filters, rules, pinned notes, the
+active filter, tz mode and per-file metadata, re-openable in any
+profile/machine); and a
 "Naive times: Local/UTC" setting for zone-less timestamps. On top of that: a **Report** tab (SQL over the
 parsed entries — presets + free-form editor, DuckDB-WASM loaded on first use)
 and **Tail live…** (live tail-following of a growing file; Chromium only,
@@ -97,7 +104,9 @@ Details, verdict on the M2 drift, and how to reproduce: `tests/perf.md`.
   Local); changing it only affects files opened afterwards — already-opened
   files must be reopened.
 - Saved filters, row-coloring rules, and pinned notes are stored per browser
-  profile in IndexedDB (client-side only; clearing site data clears them).
+  profile in IndexedDB (client-side only; clearing site data clears them) —
+  **Save/Load workspace…** bundles them (+ active filter, tz mode, per-file
+  metadata) into a portable JSON archive for moving between profiles/machines.
 - Memory ≈ 1 GB heap at 100 MB / 1.4M rows — practical ceiling ~500 MB files
   before columnar/typed-array storage (M5 perf pass; see `tests/perf.md` for
   the M3 bottleneck breakdown).

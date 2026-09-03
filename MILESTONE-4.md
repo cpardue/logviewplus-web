@@ -31,7 +31,7 @@ rules & row coloring, workspace archive save/share, and webhook notifications
    layer + IndexedDB persistence, `RulesBar` UI, AG Grid `getRowStyle`
    integration) — DONE 2026-09-03 (as-built notes below).
 3. Checkpoint C — highlights/bookmarks/notes — DONE 2026-09-03 (as-built notes below).
-4. Checkpoint D — workspace archive save/share.
+4. Checkpoint D — workspace archive save/share — DONE 2026-09-03 (as-built notes below).
 5. Checkpoint E — local `.sqlite` open (sql.js).
 6. Checkpoint F — webhook notifications + closeout (README refresh,
    NEXT-STEPS §0, history entries).
@@ -41,7 +41,7 @@ rules & row coloring, workspace archive save/share, and webhook notifications
 - [x] A — directory monitor (2026-09-03)
 - [x] B — rules & row coloring (2026-09-03)
 - [x] C — highlights/bookmarks/notes (2026-09-03)
-- [ ] D — workspace archive save/share
+- [x] D — workspace archive save/share (2026-09-03)
 - [ ] E — local `.sqlite` open (sql.js)
 - [ ] F — webhook notifications + closeout
 
@@ -62,6 +62,15 @@ rules & row coloring, workspace archive save/share, and webhook notifications
   row across tabs and the merged "All" view; the jump button scrolls a pinned
   row into view; pins persist across reloads (IndexedDB); unpinning restores
   the plain coloring. — MET 2026-09-03.
+- Checkpoint D: **Save workspace…** downloads one JSON archive bundling the
+  session state — every saved filter set, the working rule set, all pinned
+  notes (exact file:line identity + note text), the active filter, the
+  naive-timestamp mode, and per-file metadata (name/size/lines/entries/
+  status; log rows are never bundled); **Load workspace…** re-applies it in
+  the same or another profile/machine — rules replaced, pins + saved filters
+  merged (archive wins on collisions), active filter + tz mode applied;
+  invalid input is rejected with an error and leaves state untouched. — MET
+  2026-09-03.
 - Remaining criteria to be defined per checkpoint as work starts.
 
 ## As-built notes
@@ -204,20 +213,60 @@ rules & row coloring, workspace archive save/share, and webhook notifications
   tests incl. both perf gates — 10 MB 501 ms / 100 MB 4184 ms — no regression
   (M4-B baseline 629 ms / 4.36 s).
 
-## Known limitations (M4-A/B/C; deferred to later checkpoints / M5)
+### Checkpoint D (workspace archive save/share)
+
+- **Format** (`src/lib/workspace.ts`, DOM-free): one pretty-printed JSON file
+  (`logviewplus.workspace` v1, downloaded as `logviewplus-workspace.json`)
+  carrying `savedAt`/`appVersion`, `settings.tzMode`, the active `filters`,
+  every `savedFilters` set, the working `rules`, all `highlights` (pins), and
+  per-file metadata `{name,size,lines,entries,status}`. Log rows are
+  deliberately NOT bundled — files are re-opened by the user (no persistent
+  FSA handles). `parseWorkspace` throws `WorkspaceError` (surfaced via
+  `alert`) on a wrong format or unsupported version; corrupt nested records
+  are dropped/sanitized (reusing `sanitizeRules`/`sanitizeHighlights` plus
+  local filter/saved-filter/file-meta sanitizers) so one bad entry never
+  blocks the rest of the workspace.
+- **Load semantics** (`loadWorkspace` in `logStore.ts`; every write awaited,
+  then a `window.__workspaceLoadedAt` commit marker for E2E): rules REPLACED
+  — the archive is a snapshot of the workspace's whole state; pins MERGED by
+  exact (file, lineNo) identity via pure `mergeHighlights` (local id kept,
+  archive note wins; local-only and new pins both survive), persisted with a
+  new `replaceHighlights` (single clear+put IDB transaction); saved filters
+  merged by name (archive wins, local-only sets kept); active filter + tz
+  mode applied.
+- **FilterBar refresh**: the bar read its saved-filter list only at mount —
+  gained a `savedFiltersVersion` store field bumped by archive loads so new
+  sets appear without a reload (own save/delete still refresh locally).
+- **UI**: "Save workspace…" / "Load workspace…" header buttons plus a hidden
+  `workspace-input` accepting `.json`; saving with no session state just
+  downloads an empty (valid) archive.
+- **E2E** (`tests/e2e/workspace.spec.ts`, 4 specs): the download's JSON
+  content (all sections, no log rows anywhere in the file); load into a
+  profile whose IDB + localStorage were wiped (bars repopulate; the restored
+  rule color AND pin accent both apply to the pinned row after re-opening the
+  fixture; state survives a second reload); invalid file → alert, nothing
+  applied (no commit marker); hand-crafted archive vs local state → rules
+  replaced, pins merged with archive-note-wins, saved filters unioned, tz
+  mode applied, all persisted. Unit: 10 tests in `tests/unit/workspace.test.ts`
+  (round-trip, rejects, sanitization, merge).
+- **Gates:** lint clean; unit 171/171 (23 files, +10); build ok; e2e 34 incl.
+  both perf gates — 10 MB 475 ms / 100 MB 4066 ms — no regression
+  (M4-C baseline 501 ms / 4184 ms).
+
+## Known limitations (M4-A/B/C/D; deferred to later checkpoints / M5)
 
 - Top-level files only — no recursive subdirectory watch (per-subdir sessions
   would be the natural extension).
 - FSA handles are session-scoped: watch state does not survive a reload
-  (persisted directory handles + `requestPermission` re-ask belong with the
-  workspace/persistence work in checkpoint D / M5).
+  (persisted directory handles + `requestPermission` re-ask — deferred to
+  M5; checkpoint D shipped the portable archive, not persistent handles).
 - Duplicate file names (across folders and/or tabs) collide on tab testids
   and the merged File column — pre-existing, not monitor-specific.
 - Same-name delete+recreate blind spot (see as-built notes).
 - Rule UI exposes one level per rule (the model's `levels: LogLevel[]` already
   supports several; a multi-select would be the extension). Row-coloring rules
   persist per browser profile in IndexedDB like saved filters — moving them to
-  another machine is the workspace-archive job (checkpoint D).
+  another machine is now possible via Save/Load workspace (checkpoint D).
 - Pins key on (file name, lineNo) — the same pre-existing duplicate-name
   collision as tabs: two tabs opened from same-named files share pin identity.
   A pin outlives its source file (the note entry stays until deleted; the jump

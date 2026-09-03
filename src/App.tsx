@@ -27,6 +27,8 @@ export default function App() {
   const highlights = useLogStore(s => s.highlights)
   const pinRow = useLogStore(s => s.pinRow)
   const unpinRow = useLogStore(s => s.unpinRow)
+  const saveWorkspace = useLogStore(s => s.saveWorkspace)
+  const loadWorkspace = useLogStore(s => s.loadWorkspace)
   const addFiles = useLogStore(s => s.addFiles)
   const startTail = useLogStore(s => s.startTail)
   const startDirMonitor = useLogStore(s => s.startDirMonitor)
@@ -36,6 +38,7 @@ export default function App() {
   const [dragOver, setDragOver] = useState(false)
   const [view, setView] = useState<'logs' | 'report'>('logs')
   const inputRef = useRef<HTMLInputElement>(null)
+  const workspaceInputRef = useRef<HTMLInputElement>(null)
 
   const fileIds = Object.keys(files)
   const active = activeId ? files[activeId] : null
@@ -162,6 +165,16 @@ export default function App() {
         <button className="btn" data-testid="paste-button" onClick={() => void pasteFromClipboard()}>
           Paste
         </button>
+        <button className="btn" data-testid="workspace-save" onClick={() => void saveWorkspace()}>
+          Save workspace…
+        </button>
+        <button
+          className="btn"
+          data-testid="workspace-load"
+          onClick={() => workspaceInputRef.current?.click()}
+        >
+          Load workspace…
+        </button>
         {TAIL_SUPPORTED && (
           <button className="btn" data-testid="tail-button" onClick={() => void pickAndTail()}>
             Tail live…
@@ -191,6 +204,21 @@ export default function App() {
           onChange={e => {
             if (e.target.files && e.target.files.length > 0) addFiles(e.target.files)
             e.target.value = ''
+          }}
+        />
+        <input
+          ref={workspaceInputRef}
+          data-testid="workspace-input"
+          type="file"
+          hidden
+          accept=".json,application/json"
+          onChange={e => {
+            const f = e.target.files?.[0]
+            e.target.value = ''
+            if (!f) return
+            void loadWorkspace(f).catch(err =>
+              window.alert(err instanceof Error ? err.message : String(err)),
+            )
           }}
         />
       </header>

@@ -15,6 +15,7 @@ export default function FilterBar() {
   const setFilters = useLogStore(s => s.setFilters)
   const tzMode = useLogStore(s => s.tzMode)
   const setTzMode = useLogStore(s => s.setTzMode)
+  const savedFiltersVersion = useLogStore(s => s.savedFiltersVersion)
   const [text, setTextLocal] = useState('')
   const [saved, setSaved] = useState<SavedFilter[]>([])
   const [selectedName, setSelectedName] = useState('')
@@ -43,7 +44,9 @@ export default function FilterBar() {
     listSavedFilters().then(setSaved).catch(() => setSaved([]))
   }
 
-  useEffect(refresh, [])
+  // Runs at mount AND whenever the store signals an external change to the
+  // saved sets (a workspace-archive load) — save/delete refresh locally too.
+  useEffect(refresh, [savedFiltersVersion])
 
   const anyFilter = text !== '' || filters.levels.length > 0
 
