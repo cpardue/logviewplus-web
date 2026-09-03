@@ -15,6 +15,11 @@ export interface FileState {
   lines: number
   startedAt: number
   finishedAt: number | null
+  /**
+   * Parsed rows. The array reference stays stable while a file parses —
+   * batches are appended in place (see {@link appendRows}); tail rotation
+   * swaps in a fresh array.
+   */
   entries: LogEntry[]
   /** True while a live tail is appending to this file (Chromium only). */
   tail?: boolean
@@ -73,6 +78,26 @@ async function expand(list: File[]): Promise<{ files: File[]; failures: { name: 
   return { files, failures }
 }
 
+/**
+ * Append a parsed row batch to the file's entry array IN PLACE (stable array
+ * reference), then publish a fresh `FileState` object so subscribers re-render.
+ * Copying `[...f.entries, ...rows]` per 5k-row batch re-copies the whole
+ * accumulated log — O(n²) across the file (~280 full copies at 100 MB /
+ * 1.4M rows). No consumer reads `entries` while a file parses (grid and report
+ * row data are ready-gated in App.tsx), so the stable reference is safe; tail
+ * rotation replaces the array with a fresh one and appends resume into it.
+ */
+function appendRows(id: string, rows: LogEntry[], set: (fn: (s: LogState) => Partial<LogState>) => void, get: () => LogState): void {
+  const f = get().files[id]
+  if (!f || f.status === 'error') return
+  f.entries.push(...rows)
+  set(s => {
+    const cur = s.files[id]
+    if (!cur) return s
+    return { files: { ...s.files, [id]: { ...cur } } }
+  })
+}
+
 export const useLogStore = create<LogState>((set, get) => ({
   files: {},
   activeId: null,
@@ -129,11 +154,7 @@ export const useLogStore = create<LogState>((set, get) => ({
             file,
             {
               onRows(rows) {
-                set(s => {
-                  const f = s.files[id]
-                  if (!f || f.status === 'error') return s
-                  return { files: { ...s.files, [id]: { ...f, entries: [...f.entries, ...rows] } } }
-                })
+                appendRows(id, rows, set, get)
               },
               onProgress(lines, _entries, bytes) {
                 set(s => {
@@ -217,11 +238,7 @@ export const useLogStore = create<LogState>((set, get) => ({
           source,
           {
             onRows(rows) {
-              set(s => {
-                const f = s.files[id]
-                if (!f || f.status === 'error') return s
-                return { files: { ...s.files, [id]: { ...f, entries: [...f.entries, ...rows] } } }
-              })
+              appendRows(id, rows, set, get)
             },
             onProgress(lines, _entries, bytes) {
               set(s => {

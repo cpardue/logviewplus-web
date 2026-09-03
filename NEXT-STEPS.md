@@ -3,8 +3,9 @@
 > **Read this first in every new session.** Companion docs: `PLAN.md`,
 > `MILESTONE-1.md`, `README.md`, `tests/perf.md`, and the history file at
 > `../history/logviewplus-web.md` (one level up, outside the repo).
-> Last updated: 2026-09-03 ~07:15 — M3 checkpoint B COMPLETE (tail-following,
-> gates green); next: M3 checkpoint C (100 MB perf investigation + closeout).
+> Last updated: 2026-09-03 ~08:45 — **M3 COMPLETE** (checkpoint C closed:
+> 100 MB perf drift ruled environmental, store O(n²)→O(n) append fix, gates
+> green); next: M4 power features (PLAN.md §5).
 
 ## 0. Where we are (TL;DR)
 
@@ -50,8 +51,27 @@
   the tab + toolbar badge. Gates: lint / 130 unit (19 files) / build / 13 e2e
   (+2 perf skips) incl. new `tests/e2e/tail.spec.ts` (stubbed picker via
   addInitScript: append 10→15, rotation 5→3, non-Chromium degrade).
-- Next up: **M3 checkpoint C** — 100 MB perf investigation + closeout
-  (`tests/perf.md` M3 section, README refresh, NEXT-STEPS §0, history entries).
+- **M3 checkpoint C COMPLETE — 2026-09-03 (M3 DONE)**: 100 MB perf
+  investigation closed. Six re-measurements (3 pre / 3 post-fix, headless
+  Chromium vs `vite preview`): 100 MB = **4.37–4.84 s** (±0.15 s spread; at or
+  BELOW M1's one-shot 5.4 s), 10 MB = 0.66–0.68 s — vs M2's noisy 9.5–10.2 s /
+  1.34–1.55 s. Verdict: **the ~2x M2 drift was environmental** (OneDrive sync
+  + IDE/MCP load during that measurement; parse path unchanged since M1). The
+  "if real, profile" branch did not trigger. On the way in: `logStore` batch
+  append was O(n²) (`[...f.entries, ...rows]` per 5k rows — ~280 whole-array
+  copies at 1.4M rows, ~1.6 GB transient traffic; same pattern that killed the
+  M1 grid feed) → `appendRows()` in-place append + fresh `FileState` object
+  (safe: grid/report rows are ready-gated, nothing reads `entries` mid-parse).
+  Sub-neutral at 100 MB, removes quadratic growth for larger files. Docs:
+  `tests/perf.md` §M3 closeout (verdict + remaining bottlenecks parked for M5),
+  README (M3 status/usage/perf/limitations + pusher correction), MILESTONE-3
+  (C checked + as-built). Gates after the fix: lint / 130 unit (19 files) /
+  build / 15 e2e (13 + 2 perf runs green on this pass).
+- Next up: **M4 power features** (PLAN.md §5, tail now done in M3): directory
+  monitor (FSA), local `.sqlite` open (sql.js), highlights/bookmarks/notes,
+  rules & row coloring, workspace archive save/share, webhook notifications —
+  then M5 polish (encodings/culture, 1 GB+ perf pass: main-thread decode move +
+  columnar storage per `tests/perf.md`, a11y, docs).
 
 ## 1. ~~Immediate task: enable Pages, verify live site~~ — DONE 2026-09-02
 
@@ -118,18 +138,18 @@ Steps actually taken (kept for reference):
 
 ```
 npm run lint
-npm test                      # 122 unit tests, ~1 s
+npm test                      # 130 unit tests (19 files), ~1 s
 npm run build                 # tsc -b && vite build → dist/
 npm run gen:logs -- 10        # deterministic fixtures (seeded; 10MB=139769 lines, 100MB=1397688)
 npm run build                 # REQUIRED before e2e (playwright webServer serves dist via vite preview)
-npm run test:e2e              # 2 tests: fixture parse/filter chain + (PERF-gated) 10 MB perf
-$env:PERF='1'; $env:PERF_100='1'; npx playwright test   # all 3 incl. 100 MB gate (~20 s)
+npm run test:e2e              # 13 tests: app/merge/zip/paste/saved-filters/export/report/tail chains + (PERF-gated) perf
+$env:PERF='1'; $env:PERF_100='1'; npx playwright test   # 15 incl. both perf gates (~14 s on a quiet pass)
 ```
 
 - Chromium is already installed (`npx playwright install chromium` if a fresh
   Playwright version demands re-download).
-- Expected: unit 36/36; E2E counts 40 → (WARN) 7 → (+“config”) 1; perf 10 MB < 5 s
-  gate, 100 MB completes + scroll check.
+- Expected: unit 130/130; E2E counts 40 → (WARN) 7 → (+“config”) 1; perf 10 MB < 5 s
+  gate, 100 MB completes + scroll check (~4.5 s measured on this machine, 2026-09-03).
 - Quick API checks without a probe file: use MCP `github__get_repo` for repo
   status; for workflow runs there's no MCP tool — write a temp `_probe_*.mjs`
   (fetch with Bearer token, write results to `_probe_out.txt`, read it, DELETE

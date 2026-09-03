@@ -50,13 +50,15 @@ raw parse result — not the filtered grid rows. Result display is capped at
    tests for the size-diff/rotation logic, E2E with a stubbed picker) — DONE
    2026-09-03 (see as-built notes below).
 3. **Checkpoint C — Perf investigation + closeout** (100 MB quiet-machine run,
-   `tests/perf.md` M3 section, README refresh, NEXT-STEPS §0, history entries).
+   `tests/perf.md` M3 section, README refresh, NEXT-STEPS §0, history entries)
+   — DONE 2026-09-03 (verdict: M2 drift environmental; store append O(n²) → O(n)
+   fix on the way in; see as-built notes below).
 
 ## Checkpoint status
 
 - [x] A — DuckDB-WASM SQL engine + Report tab (2026-09-02)
 - [x] B — tail-following (2026-09-03)
-- [ ] C — perf investigation + closeout
+- [x] C — perf investigation + closeout (2026-09-03)
 
 ## Acceptance criteria (Definition of Done)
 
@@ -70,8 +72,8 @@ raw parse result — not the filtered grid rows. Result display is capped at
       (unit-tested pure layer; E2E asserts query results)
 - [x] Tail-following appends new lines to a running file tab (Chromium);
       non-Chromium degrades gracefully (feature-detect, no crash)
-- [ ] 100 MB perf: quiet-machine number + verdict in `tests/perf.md`
-- [ ] README updated; NEXT-STEPS §0 truthful; history entries written
+- [x] 100 MB perf: quiet-machine number + verdict in `tests/perf.md`
+- [x] README updated; NEXT-STEPS §0 truthful; history entries written
 
 ## As-built notes (deviations from plan)
 
@@ -156,3 +158,29 @@ raw parse result — not the filtered grid rows. Result display is capped at
   the test grows/replaces the buffer between polls. Three specs: append
   (10→15 entries), rotation (5→3, would be 8 without reset), unsupported
   browser degrade. All pass in ~2–3 s with the default 1 s poll interval.
+
+### Checkpoint C (perf closeout) as-built
+
+- **Verdict — M2's ~2x drift was environmental, not a regression.** Six
+  re-measurements on this machine (3 before / 3 after the store fix below):
+  100 MB = 4.37–4.84 s (spread ±0.15 s; at or BELOW M1's one-shot 5.4 s),
+  10 MB = 0.66–0.68 s (better than M1 warm). M2's 9.5–10.2 s ran with
+  OneDrive actively syncing the workspace plus VS Code/MCP load (0.7 s spread
+  between its two runs); the parse path is unchanged since M1. The "if real,
+  profile" branch did not trigger — full numbers + reasoning in
+  `tests/perf.md` §M3 closeout.
+- **Scaling fix found while investigating:** `logStore` appended each 5k-row
+  batch as `[...f.entries, ...rows]` — O(n²) whole-array re-copies (~280
+  copies / ~1.6 GB transient traffic at 1.4M rows; the same pattern that
+  killed the M1 grid feed). Replaced by `appendRows()`: in-place push to the
+  stable `entries` array + a fresh `FileState` object per batch (React sees
+  the new file object; nothing reads `entries` while parsing — grid/report
+  rows are ready-gated in `App.tsx`). Sub-neutral at 100 MB (below run noise)
+  but removes quadratic growth for larger files (~25x less copying at a
+  hypothetical 500 MB / 7M-row file). Gate suite re-run green after the change
+  (lint / 130 unit / build / 15 e2e incl. tail rotation + report specs).
+- **Remaining bottlenecks parked for M5** (in `tests/perf.md`): ~1 GB heap at
+  1.4M rows sets the ~500 MB ceiling; decode + `split('\n')` still run on the
+  main thread (moving decode into the worker via transferred ArrayBuffers is
+  the obvious next step); AG Grid's one-shot 1.4M-row model build happens
+  after the measured endpoint.

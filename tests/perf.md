@@ -66,3 +66,60 @@ Notes:
 - **M3 investigation item:** one quiet-machine 100 MB run to pin down whether
   the ~2x is environmental; if real, profile the parse path (suspects:
   draft-entry allocation shape, string row-id keys).
+
+## M3 closeout (2026-09-03) — investigation CLOSED
+
+Same fixtures, same metric, headless Chromium against `vite preview`, this
+dev machine. Three baseline runs before the store change below, three after.
+
+| Scenario | Gate | Measured (baseline 1/2/3 → after fix 1/2/3) | Status |
+| --- | --- | --- | --- |
+| 10 MB: parse + full grid ready | < 5 s | **0.68 s** → 0.67 s / 0.66 s | PASS |
+| 100 MB: completes, no tab crash, grid scrolls | completes + scrolls | **4.62 / 4.37 / 4.51 s** → 4.84 / 4.55 / 4.54 s, scroll OK every run | PASS |
+
+### Verdict: the M2 ~2x drift was environmental, not a regression
+
+- The parse path is byte-for-byte unchanged since M1 (M2 only added per-line
+  `entry.file` stamping and the one-time 200-line autodetect pass).
+- M1's 5.4 s was a single measurement on a quiet machine; the M2 re-check ran
+  while OneDrive was actively syncing this workspace, with VS Code + MCP
+  servers running (9.5–10.2 s, 0.7 s spread between its two runs).
+- The six M3 runs cluster within ~±0.15 s of each other and sit at or BELOW
+  M1's one-shot number — a real code regression would show up in every
+  measurement, not only the noisy ones. The investigation item's "if real,
+  profile the parse path" branch did not trigger. (Machine state at
+  measurement: ~30% CPU from IDE/sync background load, 15 GB free RAM — the
+  tight run-to-run spread is what makes the comparison valid, not absolute
+  idleness.)
+
+### One scaling fix made while investigating
+
+`src/store/logStore.ts` appended each 5k-row worker batch as
+`entries: [...f.entries, ...rows]` — re-copying the entire accumulated log per
+batch. O(n²) across a file: ~280 full-array copies for the 1.4M-row fixture
+(~1.6 GB of transient memory traffic). This is the same pattern that killed
+the M1 grid feed (per-batch `setData` re-diffs), relocated into the store.
+
+Fixed: `appendRows()` appends **in place** to the stable `entries` array and
+publishes a fresh `FileState` object per batch. Safe because no consumer reads
+`entries` while a file parses — grid and report row data are ready-gated in
+`App.tsx` (the `rows`/`allEntries` memos only read entries of `ready` files),
+and the live-count effect re-fires on the new file object. Tail rotation
+swaps in a fresh array; appends resume into whatever array is current.
+
+Effect: below measurement noise at 100 MB (4.5–4.8 s before/after — the copy
+was ~0.3–0.7 s of it), but it removes the quadratic growth that would dominate
+beyond it: at a ~500 MB / 7M-row file the old path did ~25x more full-array
+copying than the 100 MB case. Full gate suite (lint / 130 unit / build / 15
+e2e incl. tail rotation + report) re-run green after the change.
+
+### Remaining known bottlenecks (input for M5 perf pass)
+
+- Heap ≈ 1 GB at 1.4M rows (~700 B/row: message + raw + AG Grid row nodes).
+  The ~500 MB practical ceiling is set by this, not by parse speed.
+- Decode + `split('\n')` still run on the MAIN thread (`fileSource.ts`); a
+  100 MB file blocks UI for part of the first second or two. Moving decode
+  into the worker (transfer ArrayBuffers) is the obvious next step if needed.
+- AG Grid's one-shot 1.4M-row model build happens after the metric endpoint;
+  it is why "completes + scrolls" is the 100 MB criterion, not a paint-time gate.
+
