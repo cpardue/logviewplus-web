@@ -27,7 +27,9 @@ rules & row coloring, workspace archive save/share, and webhook notifications
 1. **Checkpoint A — Directory monitor** (`src/lib/dirWatch.ts`, `startDirMonitor`
    in `pipeline.ts`, store wiring, unit tests for the diff/feed core, E2E with
    a stubbed directory picker) — DONE 2026-09-03 (as-built notes below).
-2. Checkpoint B — rules & row coloring (suggested next).
+2. **Checkpoint B — Rules & row coloring** (`src/lib/rules.ts` pure evaluation
+   layer + IndexedDB persistence, `RulesBar` UI, AG Grid `getRowStyle`
+   integration) — DONE 2026-09-03 (as-built notes below).
 3. Checkpoint C — highlights/bookmarks/notes.
 4. Checkpoint D — workspace archive save/share.
 5. Checkpoint E — local `.sqlite` open (sql.js).
@@ -37,7 +39,7 @@ rules & row coloring, workspace archive save/share, and webhook notifications
 ## Checkpoint status
 
 - [x] A — directory monitor (2026-09-03)
-- [ ] B — rules & row coloring
+- [x] B — rules & row coloring (2026-09-03)
 - [ ] C — highlights/bookmarks/notes
 - [ ] D — workspace archive save/share
 - [ ] E — local `.sqlite` open (sql.js)
@@ -50,6 +52,11 @@ rules & row coloring, workspace archive save/share, and webhook notifications
 - Checkpoint A: Watch folder… ingests and tails top-level log files; added/
   removed files tracked per poll; Stop watching keeps rows; non-Chromium
   degrades (buttons hidden, hint shown). — MET 2026-09-03.
+- Checkpoint B: user rules (text / level / file substring match, AND within a
+  rule) color grid rows; first matching rule wins and rules override the
+  built-in level tints; reordering changes priority; the working set persists
+  across reloads (IndexedDB); deleting restores built-in coloring. — MET
+  2026-09-03.
 - Remaining criteria to be defined per checkpoint as work starts.
 
 ## As-built notes
@@ -106,7 +113,50 @@ rules & row coloring, workspace archive save/share, and webhook notifications
   gates re-run after the store refactor: 10 MB 608 ms / 100 MB 4.36 s — no
   regression (M3 cluster 4.37–4.84 s).
 
-## Known limitations (M4-A; deferred to later checkpoints / M5)
+### Checkpoint B (rules & row coloring)
+
+- **Pure evaluation layer** (`src/lib/rules.ts`, DOM-free): `Rule` =
+  `{ id, text, levels, file, color }`. Conditions combine with AND within a
+  rule; semantics mirror `Filters`: text/file are case-insensitive substrings
+  (text on message OR raw, file on the engine-stamped `entry.file` — present in
+  every view), empty `levels` = all levels including null-level entries.
+  `resolveRowColor` returns the FIRST matching rule's color (list order =
+  priority) or null. `sanitizeRules` coerces a corrupt/stale IDB record so a
+  hand-damaged database can never break the grid.
+- **Rule colors override built-in level tints:** `LogGrid.getRowStyle` resolves
+  the rule color first and falls back to the existing `ROW_STYLES` level map
+  when no rule matches (rows with no rule match are byte-for-byte as before).
+- **Style refresh path:** AG Grid caches row styles per rendered row node, so
+  a rule edit calls `api.redrawRows()` (a small `useEffect` on the rules
+  array). That only re-renders the visible virtualized window, so rule edits
+  stay cheap even at 100 MB / 1.4M rows (string matching runs per visible row,
+  never over the whole model).
+- **Persistence:** single working set stored as ONE record in a new `rules`
+  object store (keyPath `id`, key `working`) in the app's IndexedDB database.
+  Shared DB open moved to `src/lib/db.ts` (version 1 → 2; every store creation
+  guarded by `objectStoreNames.contains` so it runs on both fresh databases and
+  v1 upgrades — a lower-version open would throw). Every change auto-saves
+  (fire-and-forget put); the store restores the set at startup, so rules can
+  land after the first grid render — the redraw effect re-applies them. A
+  `window.__rulesSavedAt` commit marker lets E2E wait out the IDB put before
+  reloading (same race class as the M2 saved-filter fix).
+- **UI** (`RulesBar.tsx`, one row under FilterBar): Add rule / per-rule color
+  swatch, text, level select (Any + the six levels — single level per rule in
+  the UI; the model keeps `levels: LogLevel[]`), file name, ↑/↓ priority
+  reorder, delete. New rules cycle the six-color palette so defaults are
+  distinguishable.
+- **E2E** (`tests/e2e/rules.spec.ts`, 5 specs): text rule overrides the
+  built-in ERROR tint (asserts the pre-rule base value first); level + text
+  rules with priority reorder (first-match wins both orders); file rule in the
+  merged view (all 40 rows of one source colored, none of the other's — for
+  this fixture/viewport the whole 58-row dataset is rendered, so counts are
+  asserted directly); persistence across reload; delete restores built-in
+  coloring. Unit: 12 tests in `tests/unit/rules.test.ts`.
+- **Gates:** lint clean; unit 151/151 (21 files, +12); build ok; e2e 23 passed
+  (+2 perf skips) incl. the 5 new rules specs; perf re-check after the change:
+  10 MB 629 ms / 100 MB 4.36 s — no regression (M4-A baseline 608 ms / 4.36 s).
+
+## Known limitations (M4-A/B; deferred to later checkpoints / M5)
 
 - Top-level files only — no recursive subdirectory watch (per-subdir sessions
   would be the natural extension).
@@ -116,3 +166,7 @@ rules & row coloring, workspace archive save/share, and webhook notifications
 - Duplicate file names (across folders and/or tabs) collide on tab testids
   and the merged File column — pre-existing, not monitor-specific.
 - Same-name delete+recreate blind spot (see as-built notes).
+- Rule UI exposes one level per rule (the model's `levels: LogLevel[]` already
+  supports several; a multi-select would be the extension). Row-coloring rules
+  persist per browser profile in IndexedDB like saved filters — moving them to
+  another machine is the workspace-archive job (checkpoint D).

@@ -8,6 +8,7 @@ import { ClientSideRowModelModule } from '@ag-grid-community/client-side-row-mod
 import { AgGridReact } from '@ag-grid-community/react'
 import type { ColDef, GridApi, GridReadyEvent } from '@ag-grid-community/core'
 import type { LogEntry } from '../parsers/types'
+import { resolveRowColor, type Rule } from '../lib/rules'
 
 // Modules register once per page load (module code executes a single time).
 ModuleRegistry.registerModules([GridCoreModule, CommunityFeaturesModule, ClientSideRowModelModule])
@@ -45,9 +46,11 @@ interface Props {
   fileId: string
   /** Show the source-file column (merged view). */
   showFile?: boolean
+  /** Row-coloring rules (first match wins); override built-in level tints. */
+  rules: Rule[]
 }
 
-export default function LogGrid({ rows, fileId, showFile = false }: Props) {
+export default function LogGrid({ rows, fileId, showFile = false, rules }: Props) {
   const apiRef = useRef<GridApi<LogEntry> | null>(null)
   const columns = useMemo(
     () => (showFile ? [FILE_COLUMN, ...BASE_COLUMNS] : BASE_COLUMNS),
@@ -61,6 +64,12 @@ export default function LogGrid({ rows, fileId, showFile = false }: Props) {
     }
   }, [rows])
 
+  // Row styles are cached per row node — force a (visible-only, virtualized)
+  // re-render when the rule list changes so already-shown rows pick it up.
+  useEffect(() => {
+    apiRef.current?.redrawRows()
+  }, [rules])
+
   return (
     <div className="grid">
       <AgGridReact<LogEntry>
@@ -68,7 +77,9 @@ export default function LogGrid({ rows, fileId, showFile = false }: Props) {
         rowData={rows}
         getRowId={p => `${p.data.file ?? fileId}-${p.data.lineNo}`}
         getRowStyle={p => {
-          const bg = p.data ? ROW_STYLES[p.data.level ?? ''] : ''
+          if (!p.data) return undefined
+          // User rules take precedence over the built-in level tints.
+          const bg = resolveRowColor(rules, p.data) ?? ROW_STYLES[p.data.level ?? '']
           return bg ? { backgroundColor: bg } : undefined
         }}
         onGridReady={(e: GridReadyEvent<LogEntry>) => {

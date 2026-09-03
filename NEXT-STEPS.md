@@ -3,10 +3,10 @@
 > **Read this first in every new session.** Companion docs: `PLAN.md`,
 > `MILESTONE-1.md`, `README.md`, `tests/perf.md`, and the history file at
 > `../history/logviewplus-web.md` (one level up, outside the repo).
-> Last updated: 2026-09-03 ~09:50 — **M4 in progress**: checkpoint A DONE
-> (directory monitor — FSA folder watch auto-ingests + tails new log files;
-> gates green incl. perf re-run); next: M4 checkpoint B (rules & row
-> coloring), see `MILESTONE-4.md`.
+> Last updated: 2026-09-03 ~10:50 — **M4 in progress**: checkpoints A + B
+> DONE (directory monitor; rules & row coloring — persisted user rules →
+> grid row colors, first match wins; gates green incl. perf re-run); next: M4
+> checkpoint C (highlights/bookmarks/notes), see `MILESTONE-4.md`.
 
 ## 0. Where we are (TL;DR)
 
@@ -85,13 +85,30 @@
   build / 18 e2e (+2 perf skips); perf re-run after the store refactor:
   10 MB 608 ms, 100 MB 4.36 s — no regression. Full notes + limitations in
   `MILESTONE-4.md`.
-- Next up: **M4 checkpoint B — rules & row coloring** (user text/level/file
-  match rules → grid row colors; AG Grid `getRowStyle`/row-class path, pure
-  rule-evaluation layer unit-tested), then C highlights/bookmarks/notes,
-  D workspace archive save/share, E local `.sqlite` open (sql.js), F webhook
-  notifications + closeout — per `MILESTONE-4.md`. Then M5 polish
-  (encodings/culture, 1 GB+ perf pass: main-thread decode move + columnar
-  storage per `tests/perf.md`, a11y, docs).
+- **M4 checkpoint B COMPLETE — 2026-09-03**: rules & row coloring.
+  `src/lib/rules.ts` = DOM-free rule evaluation (`Rule { text, levels, file,
+  color }`; AND within a rule; case-insensitive substrings like Filters — text
+  on message OR raw, file on the engine-stamped `entry.file`; empty levels =
+  all incl. null) + `sanitizeRules` for corrupt IDB records. Working set
+  auto-persisted to a new IndexedDB `rules` store (shared open moved to
+  `src/lib/db.ts`, DB v1 → v2 with contains()-guarded upgrades so both fresh
+  and v1 databases work) and restored at startup. UI: `RulesBar` under
+  FilterBar (color swatch / text / level select / file / ↑↓ priority / delete;
+  new rules cycle a six-color palette). Grid: rule colors OVERRIDE built-in
+  level tints via `getRowStyle`; a `redrawRows()` effect on rule changes
+  re-applies styles to the visible virtualized window only — rule edits stay
+  cheap at 1.4M rows. New `tests/unit/rules.test.ts` (12 tests) +
+  `tests/e2e/rules.spec.ts` (5 specs: level-tint override, first-match priority
+  + reorder, file rule in merged view, reload persistence via a `__rulesSavedAt`
+  commit marker, delete restores base tints). Gates: lint / 151 unit
+  (21 files) / build / 23 e2e (+2 perf skips); perf re-run after the change:
+  10 MB 629 ms, 100 MB 4.36 s — no regression (M4-A 608 ms / 4.36 s). Full
+  notes + limitations in `MILESTONE-4.md`.
+- Next up: **M4 checkpoint C — highlights/bookmarks/notes** (pin a row with a
+  note; IndexedDB persistence), then D workspace archive save/share, E local
+  `.sqlite` open (sql.js), F webhook notifications + closeout — per
+  `MILESTONE-4.md`. Then M5 polish (encodings/culture, 1 GB+ perf pass:
+  main-thread decode move + columnar storage per `tests/perf.md`, a11y, docs).
 
 ## 1. ~~Immediate task: enable Pages, verify live site~~ — DONE 2026-09-02
 

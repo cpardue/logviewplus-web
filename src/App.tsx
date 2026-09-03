@@ -6,6 +6,7 @@ import { isDirSupported } from './lib/dirWatch'
 import { isTailSupported } from './lib/tail'
 import Toolbar from './components/Toolbar'
 import FilterBar from './components/FilterBar'
+import RulesBar from './components/RulesBar'
 import ExportBar from './components/ExportBar'
 import LogGrid from './components/LogGrid'
 import ReportBar from './components/ReportBar'
@@ -21,6 +22,7 @@ export default function App() {
   const filters = useLogStore(s => s.filters)
   const merged = useLogStore(s => s.merged)
   const dirName = useLogStore(s => s.dirName)
+  const rules = useLogStore(s => s.rules)
   const addFiles = useLogStore(s => s.addFiles)
   const startTail = useLogStore(s => s.startTail)
   const startDirMonitor = useLogStore(s => s.startDirMonitor)
@@ -203,10 +205,11 @@ export default function App() {
             <Toolbar file={active} />
           )}
           <FilterBar />
+          <RulesBar />
           <ExportBar rows={rows} label={merged ? 'all-files' : (active?.name ?? 'log')} />
           <section className="grid-wrap">
             {merged || active ? (
-              <LogGrid rows={rows} fileId={merged ? 'all' : active!.id} showFile={merged} />
+              <LogGrid rows={rows} fileId={merged ? 'all' : active!.id} showFile={merged} rules={rules} />
             ) : (
               <div className="empty-hint">Drop log files here, or click “Open files…”</div>
             )}

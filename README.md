@@ -10,12 +10,14 @@ Intended for personal/internal use (GitHub Pages ToS prohibits commercial SaaS).
 
 ## Status
 
-**Milestone 4 in progress (2026-09-03):** checkpoint A done — **Watch
+**Milestone 4 in progress (2026-09-03):** checkpoints A + B done — **Watch
 folder…**: a live directory monitor (File System Access API, Chromium-only,
 feature-detected) that ingests and tail-follows new log files as they appear
-in the picked folder; removed files keep their rows. Remaining M4: rules &
-row coloring, highlights/bookmarks/notes, workspace archive, local `.sqlite`
-open, webhook notifications (see `MILESTONE-4.md`).
+in the picked folder; removed files keep their rows. Plus **rules & row
+coloring**: user-defined text / level / file match rules color grid rows
+(first matching rule wins, overrides the built-in level tints), persisted in
+IndexedDB across reloads. Remaining M4: highlights/bookmarks/notes, workspace
+archive, local `.sqlite` open, webhook notifications (see `MILESTONE-4.md`).
 
 **Milestone 3 complete (2026-09-03):** on top of M2 — a Report tab with real
 SQL over the parsed entries (DuckDB-WASM in a worker, lazily loaded on first
@@ -45,10 +47,12 @@ Open the site, then drag & drop log files anywhere or use **Open files…**
 pasted text becomes a synthetic file). Formats are auto-detected per file. Per
 file you get: name, size, live parse progress, entries/lines + elapsed time;
 Time / Level / Message (+ File in merged view) columns with level row
-coloring; a case-insensitive text filter and level chips that apply to the
-parsed data without re-parsing; saved filter sets persisted in IndexedDB;
-CSV/JSON export of the filtered rows; and a "Naive times: Local/UTC" setting
-for zone-less timestamps. On top of that: a **Report** tab (SQL over the
+coloring — plus **rules** that color rows by text / level / file name match
+(each rule ANDs its conditions; the first matching rule wins and overrides the
+level tints; rules persist across reloads); a case-insensitive text filter and
+level chips that apply to the parsed data without re-parsing; saved filter
+sets persisted in IndexedDB; CSV/JSON export of the filtered rows; and a
+"Naive times: Local/UTC" setting for zone-less timestamps. On top of that: a **Report** tab (SQL over the
 parsed entries — presets + free-form editor, DuckDB-WASM loaded on first use)
 and **Tail live…** (live tail-following of a growing file; Chromium only,
 other browsers get a hint instead) and **Watch folder…** (a directory monitor
@@ -86,8 +90,8 @@ Details, verdict on the M2 drift, and how to reproduce: `tests/perf.md`.
 - Naive timestamps (no timezone) follow the "Naive times" setting (default
   Local); changing it only affects files opened afterwards — already-opened
   files must be reopened.
-- Saved filters are stored per browser profile in IndexedDB (client-side only;
-  clearing site data clears them).
+- Saved filters and row-coloring rules are stored per browser profile in
+  IndexedDB (client-side only; clearing site data clears them).
 - Memory ≈ 1 GB heap at 100 MB / 1.4M rows — practical ceiling ~500 MB files
   before columnar/typed-array storage (M5 perf pass; see `tests/perf.md` for
   the M3 bottleneck breakdown).

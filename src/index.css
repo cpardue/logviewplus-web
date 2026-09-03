@@ -203,6 +203,75 @@ body {
   border-color: #b71c1c;
 }
 
+/* Row-coloring rules (M4 checkpoint B) */
+.rulesbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 16px;
+  border-bottom: 1px solid #2a2d33;
+}
+
+.rules-hint {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.rule {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #3a3f47;
+  border-radius: 6px;
+  padding: 3px 6px;
+  background: #1c2026;
+}
+
+.rule-color {
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #3a3f47;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+
+.rule-color::-webkit-color-swatch-wrapper {
+  padding: 1px;
+}
+
+.rule-color::-webkit-color-swatch {
+  border: none;
+  border-radius: 3px;
+}
+
+.rule-input {
+  width: 120px;
+  background: #14171b;
+  border: 1px solid #3a3f47;
+  color: #e8e8e8;
+  border-radius: 4px;
+  padding: 3px 7px;
+  font-size: 12.5px;
+}
+
+.rule-select {
+  background: #14171b;
+  border: 1px solid #3a3f47;
+  color: #e8e8e8;
+  border-radius: 4px;
+  padding: 3px 4px;
+  font-size: 12.5px;
+}
+
+.rule-btn {
+  padding: 2px 7px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
 .grid-wrap {
   flex: 1;
   min-height: 0;

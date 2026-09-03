@@ -1,4 +1,4 @@
-import { openDB, type IDBPDatabase } from 'idb'
+import { db } from './db'
 import type { Filters } from './filters'
 
 export interface SavedFilter {
@@ -7,22 +7,7 @@ export interface SavedFilter {
   savedAt: number
 }
 
-const DB_NAME = 'logviewplus-web'
 const STORE = 'saved-filters'
-
-let dbPromise: Promise<IDBPDatabase> | null = null
-
-function db(): Promise<IDBPDatabase> {
-  if (!dbPromise) {
-    dbPromise = openDB(DB_NAME, 1, {
-      upgrade(d) {
-        const s = d.createObjectStore(STORE, { keyPath: 'name' })
-        s.createIndex('savedAt', 'savedAt')
-      },
-    })
-  }
-  return dbPromise
-}
 
 /** All saved filter sets, newest first. */
 export async function listSavedFilters(): Promise<SavedFilter[]> {

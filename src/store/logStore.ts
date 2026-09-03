@@ -5,6 +5,8 @@ import { startParse, startTail, startDirMonitor as watchDir, type ParseSession }
 import { FsaDir } from '../lib/dirWatch'
 import { HandleSource, type TailSource } from '../lib/tail'
 import { ingestZip } from '../lib/ingest'
+import { loadRules, saveRules } from '../lib/rules-db'
+import type { Rule } from '../lib/rules'
 
 export interface FileState {
   id: string
@@ -37,6 +39,8 @@ interface LogState {
   merged: boolean
   /** Name of the watched folder (Chromium only); null when not watching. */
   dirName: string | null
+  /** Row-coloring rules, ordered by priority (first match wins). Persisted. */
+  rules: Rule[]
   addFiles(list: FileList | File[]): void
   /** Start tail-following a File System Access API handle (Chromium only). */
   startTail(handle: FileSystemFileHandle): void
@@ -52,6 +56,8 @@ interface LogState {
   clearFilters(): void
   setFilters(f: Filters): void
   setTzMode(mode: 'local' | 'utc'): void
+  /** Replace the rule list (persists to IndexedDB). */
+  setRules(rules: Rule[]): void
 }
 
 const sessions = new Map<string, ParseSession>()
@@ -240,6 +246,7 @@ export const useLogStore = create<LogState>((set, get) => ({
   tzMode: readTzMode(),
   merged: false,
   dirName: null,
+  rules: [],
 
   addFiles(list) {
     void (async () => {
@@ -435,4 +442,20 @@ export const useLogStore = create<LogState>((set, get) => ({
       // persistence is best-effort
     }
   },
+
+  setRules(rules) {
+    set({ rules })
+    void saveRules(rules)
+      .then(() => {
+        // Test hook: E2E waits on this commit marker before reloading the page.
+        ;(window as unknown as { __rulesSavedAt?: number }).__rulesSavedAt = Date.now()
+      })
+      .catch(() => {
+        // DB unavailable — rules still apply for this session.
+      })
+  },
 }))
+
+// Restore the persisted rule set at startup. IndexedDB is async, so rules may
+// arrive after the first render — LogGrid redraws its rows when they land.
+void loadRules().then(rules => useLogStore.setState({ rules }))
