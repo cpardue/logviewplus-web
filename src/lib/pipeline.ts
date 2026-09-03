@@ -1,5 +1,6 @@
 import { DEFAULT_CHUNK, readTextChunks } from './fileSource'
 import { detectFormat } from '../parsers/detect'
+import { DirFeed, type DirEntry, type DirSource } from './dirWatch'
 import { TailFeed, type TailSource } from './tail'
 import type { LogEntry, ParserSpec } from '../parsers/types'
 
@@ -214,6 +215,93 @@ export function startTail(source: TailSource, callbacks: TailCallbacks, opts: Ta
       stopped = true
       clearInterval(timer)
       worker.terminate()
+    },
+  }
+}
+
+/** Extensions a directory monitor ingests by default (mirrors the file input). */
+export const DEFAULT_DIR_ACCEPT = ['.log', '.txt', '.out', '.json', '.csv', '.gc', '.yml', '.xml']
+
+export interface DirMonitorCallbacks {
+  /** A top-level file appeared (initial scan or added later). */
+  onNewFile(entry: DirEntry, open: () => Promise<TailSource | null>): void
+  /** A monitored file disappeared; the caller should detach its tail session. */
+  onRemoved(name: string): void
+  /** The directory listing failed (permission revoked, folder moved) — the monitor stops. */
+  onError(message: string): void
+}
+
+export interface DirMonitorOptions {
+  /** Poll interval in ms (default 1000). */
+  pollMs?: number
+  /** Dot-prefixed extensions to ingest, case-insensitive. */
+  accept?: string[]
+}
+
+function hasAcceptedName(name: string, accept: string[]): boolean {
+  const lower = name.toLowerCase()
+  return accept.some(ext => lower.endsWith(ext))
+}
+
+/**
+ * Watch a directory: the initial scan emits every accepted top-level file,
+ * then polls for membership changes (added → emit, removed → notify).
+ * Per-file growth/rotation is NOT handled here — each ingested file is tailed
+ * by its own session and sees byte-level changes on its own poll.
+ */
+export function startDirMonitor(source: DirSource, callbacks: DirMonitorCallbacks, opts: DirMonitorOptions = {}): ParseSession {
+  const feed = new DirFeed(source)
+  const pollMs = opts.pollMs ?? 1000
+  const accept = opts.accept ?? DEFAULT_DIR_ACCEPT
+  let closed = false
+  let initialDone = false
+  let timer: ReturnType<typeof setInterval> | null = null
+
+  async function pollOnce(): Promise<void> {
+    if (closed || !initialDone) return
+    try {
+      const diff = await feed.next()
+      if (closed) return
+      for (const entry of diff.added) {
+        if (hasAcceptedName(entry.name, accept)) callbacks.onNewFile(entry, () => source.open(entry.name))
+      }
+      for (const entry of diff.removed) callbacks.onRemoved(entry.name)
+    } catch (err) {
+      // Listing failed — mid-session this is unrecoverable (e.g. permission
+      // revoked); stop and surface the error.
+      if (!closed) {
+        closed = true
+        if (timer) clearInterval(timer)
+        callbacks.onError(String(err))
+      }
+    }
+  }
+
+  timer = setInterval(() => void pollOnce(), pollMs)
+
+  void (async () => {
+    try {
+      const first = await feed.first()
+      if (closed) return
+      for (const entry of first.added) {
+        if (hasAcceptedName(entry.name, accept)) callbacks.onNewFile(entry, () => source.open(entry.name))
+      }
+    } catch (err) {
+      if (!closed) {
+        closed = true
+        if (timer) clearInterval(timer)
+        callbacks.onError(String(err))
+      }
+    } finally {
+      initialDone = true
+    }
+  })()
+
+  return {
+    close() {
+      closed = true
+      initialDone = true
+      if (timer) clearInterval(timer)
     },
   }
 }

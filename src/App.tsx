@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLogStore } from './store/logStore'
 import { applyFilters } from './lib/filters'
 import { pasteFileName, textToFile } from './lib/ingest'
+import { isDirSupported } from './lib/dirWatch'
 import { isTailSupported } from './lib/tail'
 import Toolbar from './components/Toolbar'
 import FilterBar from './components/FilterBar'
@@ -12,14 +13,18 @@ import ReportBar from './components/ReportBar'
 const EMPTY_ROWS: never[] = []
 // Evaluated once per page load — the File System Access API is either there (Chromium) or not.
 const TAIL_SUPPORTED = isTailSupported()
+const DIR_SUPPORTED = isDirSupported()
 
 export default function App() {
   const files = useLogStore(s => s.files)
   const activeId = useLogStore(s => s.activeId)
   const filters = useLogStore(s => s.filters)
   const merged = useLogStore(s => s.merged)
+  const dirName = useLogStore(s => s.dirName)
   const addFiles = useLogStore(s => s.addFiles)
   const startTail = useLogStore(s => s.startTail)
+  const startDirMonitor = useLogStore(s => s.startDirMonitor)
+  const stopDirMonitor = useLogStore(s => s.stopDirMonitor)
   const setActive = useLogStore(s => s.setActive)
   const setMerged = useLogStore(s => s.setMerged)
   const [dragOver, setDragOver] = useState(false)
@@ -72,6 +77,17 @@ export default function App() {
         multiple: false,
       })
       startTail(handle)
+    } catch {
+      // User cancelled the picker (AbortError) — nothing to do.
+    }
+  }
+
+  /** Ask for a folder handle (Chromium File System Access API) and watch it. */
+  async function pickAndWatch() {
+    if (!window.showDirectoryPicker) return // non-Chromium — button is hidden anyway
+    try {
+      const handle = await window.showDirectoryPicker({ id: 'logviewplus', mode: 'read' })
+      startDirMonitor(handle)
     } catch {
       // User cancelled the picker (AbortError) — nothing to do.
     }
@@ -140,13 +156,23 @@ export default function App() {
         <button className="btn" data-testid="paste-button" onClick={() => void pasteFromClipboard()}>
           Paste
         </button>
-        {TAIL_SUPPORTED ? (
+        {TAIL_SUPPORTED && (
           <button className="btn" data-testid="tail-button" onClick={() => void pickAndTail()}>
             Tail live…
           </button>
-        ) : (
+        )}
+        {dirName != null ? (
+          <button className="btn" data-testid="dir-stop" onClick={() => stopDirMonitor()}>
+            Stop watching {dirName}
+          </button>
+        ) : DIR_SUPPORTED ? (
+          <button className="btn" data-testid="dir-button" onClick={() => void pickAndWatch()}>
+            Watch folder…
+          </button>
+        ) : null}
+        {!TAIL_SUPPORTED && !DIR_SUPPORTED && (
           <span className="tail-hint" data-testid="tail-unsupported">
-            Live tail needs Chrome or Edge
+            Live tail &amp; folder watch need Chrome or Edge
           </span>
         )}
         <input

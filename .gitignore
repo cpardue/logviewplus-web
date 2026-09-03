@@ -17,6 +17,7 @@ dist
 
 # Project artifacts
 tests/fixtures/logs/generated/
+test-results/
 _*.bak
 _play_*
 

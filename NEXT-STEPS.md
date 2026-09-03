@@ -3,9 +3,10 @@
 > **Read this first in every new session.** Companion docs: `PLAN.md`,
 > `MILESTONE-1.md`, `README.md`, `tests/perf.md`, and the history file at
 > `../history/logviewplus-web.md` (one level up, outside the repo).
-> Last updated: 2026-09-03 ~08:45 — **M3 COMPLETE** (checkpoint C closed:
-> 100 MB perf drift ruled environmental, store O(n²)→O(n) append fix, gates
-> green); next: M4 power features (PLAN.md §5).
+> Last updated: 2026-09-03 ~09:50 — **M4 in progress**: checkpoint A DONE
+> (directory monitor — FSA folder watch auto-ingests + tails new log files;
+> gates green incl. perf re-run); next: M4 checkpoint B (rules & row
+> coloring), see `MILESTONE-4.md`.
 
 ## 0. Where we are (TL;DR)
 
@@ -67,11 +68,30 @@
   README (M3 status/usage/perf/limitations + pusher correction), MILESTONE-3
   (C checked + as-built). Gates after the fix: lint / 130 unit (19 files) /
   build / 15 e2e (13 + 2 perf runs green on this pass).
-- Next up: **M4 power features** (PLAN.md §5, tail now done in M3): directory
-  monitor (FSA), local `.sqlite` open (sql.js), highlights/bookmarks/notes,
-  rules & row coloring, workspace archive save/share, webhook notifications —
-  then M5 polish (encodings/culture, 1 GB+ perf pass: main-thread decode move +
-  columnar storage per `tests/perf.md`, a11y, docs).
+- **M4 checkpoint A COMPLETE — 2026-09-03**: directory monitor (FSA,
+  Chromium). `src/lib/dirWatch.ts` = DOM-free core (`DirFeed`/pure
+  `diffDirs`; diff key = name only — size changes are owned by each file's
+  own `TailFeed`, `lastModified` excluded because it changes on every append)
+  + `FsaDir` adapter (top-level files only). `startDirMonitor` in pipeline
+  (initial scan + 1 s membership poll, accept-list filtered); store gained
+  `dirName`/`startDirMonitor`/`stopDirMonitor` and a shared
+  `beginTail(source, activateIfNone)` (manual Tail force-activates, monitor
+  ingest activates only if no tab active) + `detachTail` (rows kept; a
+  mid-parse file flips to `ready` with partial content). UI: "Watch folder…"
+  / "Stop watching …" buttons; non-Chromium hint now covers both features.
+  Same-name delete+recreate is a documented blind spot. New
+  `tests/e2e/dir.spec.ts` (5 specs, stubbed `showDirectoryPicker`) +
+  `tests/unit/dirWatch.test.ts` (+9). Gates: lint / 139 unit (20 files) /
+  build / 18 e2e (+2 perf skips); perf re-run after the store refactor:
+  10 MB 608 ms, 100 MB 4.36 s — no regression. Full notes + limitations in
+  `MILESTONE-4.md`.
+- Next up: **M4 checkpoint B — rules & row coloring** (user text/level/file
+  match rules → grid row colors; AG Grid `getRowStyle`/row-class path, pure
+  rule-evaluation layer unit-tested), then C highlights/bookmarks/notes,
+  D workspace archive save/share, E local `.sqlite` open (sql.js), F webhook
+  notifications + closeout — per `MILESTONE-4.md`. Then M5 polish
+  (encodings/culture, 1 GB+ perf pass: main-thread decode move + columnar
+  storage per `tests/perf.md`, a11y, docs).
 
 ## 1. ~~Immediate task: enable Pages, verify live site~~ — DONE 2026-09-02
 
@@ -138,18 +158,19 @@ Steps actually taken (kept for reference):
 
 ```
 npm run lint
-npm test                      # 130 unit tests (19 files), ~1 s
+npm test                      # 139 unit tests (20 files), ~1 s
 npm run build                 # tsc -b && vite build → dist/
 npm run gen:logs -- 10        # deterministic fixtures (seeded; 10MB=139769 lines, 100MB=1397688)
 npm run build                 # REQUIRED before e2e (playwright webServer serves dist via vite preview)
-npm run test:e2e              # 13 tests: app/merge/zip/paste/saved-filters/export/report/tail chains + (PERF-gated) perf
-$env:PERF='1'; $env:PERF_100='1'; npx playwright test   # 15 incl. both perf gates (~14 s on a quiet pass)
+npm run test:e2e              # 18 tests: app/merge/zip/paste/saved-filters/export/report/tail/dir chains + (PERF-gated) perf
+$env:PERF='1'; $env:PERF_100='1'; npx playwright test   # 20 incl. both perf gates (~14 s on a quiet pass)
 ```
 
 - Chromium is already installed (`npx playwright install chromium` if a fresh
   Playwright version demands re-download).
-- Expected: unit 130/130; E2E counts 40 → (WARN) 7 → (+“config”) 1; perf 10 MB < 5 s
-  gate, 100 MB completes + scroll check (~4.5 s measured on this machine, 2026-09-03).
+- Expected: unit 139/139; E2E counts 40 → (WARN) 7 → (+“config”) 1; dir spec
+  All-view total 15 (10+5 entries); perf 10 MB < 5 s gate, 100 MB completes +
+  scroll check (~4.5 s measured on this machine, 2026-09-03).
 - Quick API checks without a probe file: use MCP `github__get_repo` for repo
   status; for workflow runs there's no MCP tool — write a temp `_probe_*.mjs`
   (fetch with Bearer token, write results to `_probe_out.txt`, read it, DELETE
@@ -207,7 +228,10 @@ breadth (Json/W3c/Combined/Dsv/XmlLog4j + detect/factory), `src/lib/{ingest,filt
 and `src/components/ExportBar.tsx`; M3 added `src/lib/sql/*` (DuckDB-WASM engine
 over an Arrow `entries` table), `src/store/reportStore.ts`,
 `src/components/{ReportBar,ReportGrid}.tsx`, `src/lib/tail.ts` (+ `startTail` in
-pipeline + worker `reset`/epoch protocol), and `tests/e2e/{report,tail}.spec.ts`
+pipeline + worker `reset`/epoch protocol), and `tests/e2e/{report,tail}.spec.ts`;
+M4-A added `src/lib/dirWatch.ts` (+ `startDirMonitor` in pipeline, store
+`dirName`/`startDirMonitor`/`stopDirMonitor`, `beginTail`/`detachTail` refactor)
+and `tests/{unit/dirWatch.test.ts, e2e/dir.spec.ts}`
 
 ```
 src/parsers/        pure parser core: types.ts, levels.ts, timestamps.ts,

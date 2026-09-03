@@ -1,8 +1,9 @@
 import { create } from 'zustand'
 import type { LogEntry, LogLevel } from '../parsers/types'
 import { EMPTY_FILTERS, type Filters } from '../lib/filters'
-import { startParse, startTail, type ParseSession } from '../lib/pipeline'
-import { HandleSource } from '../lib/tail'
+import { startParse, startTail, startDirMonitor as watchDir, type ParseSession } from '../lib/pipeline'
+import { FsaDir } from '../lib/dirWatch'
+import { HandleSource, type TailSource } from '../lib/tail'
 import { ingestZip } from '../lib/ingest'
 
 export interface FileState {
@@ -34,9 +35,15 @@ interface LogState {
   tzMode: 'local' | 'utc'
   /** "All" merged view across every ready file. */
   merged: boolean
+  /** Name of the watched folder (Chromium only); null when not watching. */
+  dirName: string | null
   addFiles(list: FileList | File[]): void
   /** Start tail-following a File System Access API handle (Chromium only). */
   startTail(handle: FileSystemFileHandle): void
+  /** Watch a folder: accepted top-level files are ingested + tailed (Chromium only). */
+  startDirMonitor(handle: FileSystemDirectoryHandle): void
+  /** Stop the folder watch; parsed rows stay, live sessions detach. */
+  stopDirMonitor(): void
   removeFile(id: string): void
   setActive(id: string | null): void
   setMerged(on: boolean): void
@@ -49,6 +56,10 @@ interface LogState {
 
 const sessions = new Map<string, ParseSession>()
 let nextId = 1
+/** Active folder monitor (null when not watching). */
+let dirSession: ParseSession | null = null
+/** id → file name for tabs opened by the directory monitor. */
+const dirFiles = new Map<string, string>()
 
 const TZ_KEY = 'lvp.tzMode'
 
@@ -98,12 +109,137 @@ function appendRows(id: string, rows: LogEntry[], set: (fn: (s: LogState) => Par
   })
 }
 
+type StoreSet = (fn: (s: LogState) => Partial<LogState>) => void
+type StoreGet = () => LogState
+
+/**
+ * Create a FileState and an open-ended tail session for a tailable source;
+ * returns the new file id (null when the source is already gone).
+ * `activateIfNone` force-switches to the tab (manual "Tail live…" — a live
+ * tail is meant to be watched); bulk directory ingest passes false so it only
+ * activates when nothing is active and does not yank the view around.
+ */
+async function beginTail(get: StoreGet, set: StoreSet, source: TailSource, activateIfNone: boolean): Promise<string | null> {
+  let size: number
+  try {
+    size = await source.stat()
+  } catch {
+    return null // handle already dead — nothing to tail
+  }
+  if (size < 0) return null
+  const id = `f${nextId++}`
+  set(s => ({
+    files: {
+      ...s.files,
+      [id]: {
+        id,
+        name: source.name ?? 'unknown',
+        size,
+        status: 'parsing',
+        fraction: 0,
+        lines: 0,
+        startedAt: performance.now(),
+        finishedAt: null,
+        entries: [],
+        tail: true,
+      },
+    },
+    // Live tail is meant to be watched — switch to it.
+    activeId: activateIfNone ? id : (s.activeId ?? id),
+    merged: activateIfNone ? false : s.merged,
+  }))
+  sessions.set(
+    id,
+    startTail(
+      source,
+      {
+        onRows(rows) {
+          appendRows(id, rows, set, get)
+        },
+        onProgress(lines, _entries, bytes) {
+          set(s => {
+            const f = s.files[id]
+            if (!f || f.status === 'error') return s
+            return {
+              files: { ...s.files, [id]: { ...f, lines, fraction: f.size > 0 ? Math.min(1, bytes / f.size) : 0 } },
+            }
+          })
+        },
+        // Initial read done — usable; appended rows keep flowing after this.
+        onInitial() {
+          set(s => {
+            const f = s.files[id]
+            if (!f) return s
+            return { files: { ...s.files, [id]: { ...f, status: 'ready', fraction: 1, finishedAt: performance.now() } } }
+          })
+        },
+        // Post-reset ack: safe to drop pre-rotation rows; refresh displayed size.
+        onRotation() {
+          void (async () => {
+            let rotatedSize = size
+            try {
+              rotatedSize = await source.stat()
+            } catch {
+              // keep the last known size
+            }
+            set(s => {
+              const f = s.files[id]
+              if (!f) return s
+              return { files: { ...s.files, [id]: { ...f, entries: [], lines: 0, size: rotatedSize } } }
+            })
+          })()
+        },
+        // File disappeared (deleted/moved): rows stay, badge clears.
+        onStopped() {
+          detachTail(id, set)
+        },
+        onError(message) {
+          set(s => {
+            const f = s.files[id]
+            if (!f) return s
+            return { files: { ...s.files, [id]: { ...f, status: 'error', error: message, finishedAt: performance.now() } } }
+          })
+        },
+      },
+      { tzMode: get().tzMode },
+    ),
+  )
+  return id
+}
+
+/**
+ * Detach a live tail session while keeping the parsed rows: terminate the
+ * worker, clear the tail badge, and flip a file still mid-initial-read to
+ * `ready` with its partial content (otherwise it would stay "parsing…"
+ * forever — the worker that would finish it is gone).
+ */
+function detachTail(id: string, set: StoreSet): void {
+  sessions.get(id)?.close()
+  set(s => {
+    const f = s.files[id]
+    if (!f) return s
+    return {
+      files: {
+        ...s.files,
+        [id]: {
+          ...f,
+          tail: false,
+          status: f.status === 'parsing' ? 'ready' : f.status,
+          fraction: 1,
+          finishedAt: f.finishedAt ?? performance.now(),
+        },
+      },
+    }
+  })
+}
+
 export const useLogStore = create<LogState>((set, get) => ({
   files: {},
   activeId: null,
   filters: EMPTY_FILTERS,
   tzMode: readTzMode(),
   merged: false,
+  dirName: null,
 
   addFiles(list) {
     void (async () => {
@@ -204,106 +340,54 @@ export const useLogStore = create<LogState>((set, get) => ({
 
   startTail(handle) {
     void (async () => {
-      let size: number
-      try {
-        size = (await handle.getFile()).size
-      } catch {
-        return // handle already dead — nothing to tail
-      }
-      const id = `f${nextId++}`
-      set(s => ({
-        files: {
-          ...s.files,
-          [id]: {
-            id,
-            name: handle.name,
-            size,
-            status: 'parsing',
-            fraction: 0,
-            lines: 0,
-            startedAt: performance.now(),
-            finishedAt: null,
-            entries: [],
-            tail: true,
-          },
-        },
-        // Live tail is meant to be watched — switch to it.
-        activeId: id,
-        merged: false,
-      }))
-      const source = new HandleSource(handle)
-      sessions.set(
-        id,
-        startTail(
-          source,
-          {
-            onRows(rows) {
-              appendRows(id, rows, set, get)
-            },
-            onProgress(lines, _entries, bytes) {
-              set(s => {
-                const f = s.files[id]
-                if (!f || f.status === 'error') return s
-                return {
-                  files: {
-                    ...s.files,
-                    [id]: { ...f, lines, fraction: f.size > 0 ? Math.min(1, bytes / f.size) : 0 },
-                  },
-                }
-              })
-            },
-            // Initial read done — usable; appended rows keep flowing after this.
-            onInitial() {
-              set(s => {
-                const f = s.files[id]
-                if (!f) return s
-                return {
-                  files: { ...s.files, [id]: { ...f, status: 'ready', fraction: 1, finishedAt: performance.now() } },
-                }
-              })
-            },
-            // Post-reset ack: safe to drop pre-rotation rows; refresh displayed size.
-            onRotation() {
-              void (async () => {
-                let rotatedSize = size
-                try {
-                  rotatedSize = await source.stat()
-                } catch {
-                  // keep the last known size
-                }
-                set(s => {
-                  const f = s.files[id]
-                  if (!f) return s
-                  return { files: { ...s.files, [id]: { ...f, entries: [], lines: 0, size: rotatedSize } } }
-                })
-              })()
-            },
-            onStopped() {
-              set(s => {
-                const f = s.files[id]
-                if (!f) return s
-                return { files: { ...s.files, [id]: { ...f, tail: false } } }
-              })
-            },
-            onError(message) {
-              set(s => {
-                const f = s.files[id]
-                if (!f) return s
-                return {
-                  files: { ...s.files, [id]: { ...f, status: 'error', error: message, finishedAt: performance.now() } },
-                }
-              })
-            },
-          },
-          { tzMode: get().tzMode },
-        ),
-      )
+      await beginTail(get, set, new HandleSource(handle), true)
     })()
+  },
+
+  startDirMonitor(handle) {
+    if (dirSession) return // already watching — the UI hides the button anyway
+    set({ dirName: handle.name })
+    const source = new FsaDir(handle)
+    dirSession = watchDir(
+      source,
+      {
+        onNewFile(entry, open) {
+          void (async () => {
+            const src = await open()
+            if (!src) return // vanished between the directory listing and the open
+            const id = await beginTail(get, set, src, false)
+            if (id) dirFiles.set(id, entry.name)
+          })()
+        },
+        onRemoved(name) {
+          for (const [id, n] of [...dirFiles]) {
+            if (n !== name) continue
+            dirFiles.delete(id)
+            detachTail(id, set)
+          }
+        },
+        // Listing failed (permission revoked, folder moved): stop cleanly —
+        // the button comes back and already-parsed rows stay where they are.
+        onError: () => {
+          get().stopDirMonitor()
+        },
+      },
+      { pollMs: 1000 },
+    )
+  },
+
+  stopDirMonitor() {
+    dirSession?.close()
+    dirSession = null
+    for (const id of [...dirFiles.keys()]) detachTail(id, set)
+    dirFiles.clear()
+    if (get().dirName != null) set({ dirName: null })
   },
 
   removeFile(id) {
     sessions.get(id)?.close()
     sessions.delete(id)
+    dirFiles.delete(id)
     set(s => {
       const files = { ...s.files }
       delete files[id]

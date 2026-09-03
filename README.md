@@ -10,6 +10,13 @@ Intended for personal/internal use (GitHub Pages ToS prohibits commercial SaaS).
 
 ## Status
 
+**Milestone 4 in progress (2026-09-03):** checkpoint A done — **Watch
+folder…**: a live directory monitor (File System Access API, Chromium-only,
+feature-detected) that ingests and tail-follows new log files as they appear
+in the picked folder; removed files keep their rows. Remaining M4: rules &
+row coloring, highlights/bookmarks/notes, workspace archive, local `.sqlite`
+open, webhook notifications (see `MILESTONE-4.md`).
+
 **Milestone 3 complete (2026-09-03):** on top of M2 — a Report tab with real
 SQL over the parsed entries (DuckDB-WASM in a worker, lazily loaded on first
 Run; presets + free-form editor + result grid), live tail-following of growing
@@ -28,6 +35,7 @@ CSV/JSON export of the filtered rows.
 - `MILESTONE-1.md` — M1 tasks + acceptance criteria (done)
 - `MILESTONE-2.md` — M2 tasks + acceptance criteria (done)
 - `MILESTONE-3.md` — M3 tasks + acceptance criteria (done)
+- `MILESTONE-4.md` — M4 power features: tasks, checkpoint A as-built, limitations
 - `tests/perf.md` — measured performance numbers (M1, M2 re-check, M3 closeout)
 
 ## Usage
@@ -43,7 +51,9 @@ CSV/JSON export of the filtered rows; and a "Naive times: Local/UTC" setting
 for zone-less timestamps. On top of that: a **Report** tab (SQL over the
 parsed entries — presets + free-form editor, DuckDB-WASM loaded on first use)
 and **Tail live…** (live tail-following of a growing file; Chromium only,
-other browsers get a hint instead). All parsing happens locally in your
+other browsers get a hint instead) and **Watch folder…** (a directory monitor
+that ingests + tails new log files as they appear in the picked folder;
+Chromium only). All parsing happens locally in your
 browser — files are never uploaded.
 
 ```
@@ -81,8 +91,11 @@ Details, verdict on the M2 drift, and how to reproduce: `tests/perf.md`.
 - Memory ≈ 1 GB heap at 100 MB / 1.4M rows — practical ceiling ~500 MB files
   before columnar/typed-array storage (M5 perf pass; see `tests/perf.md` for
   the M3 bottleneck breakdown).
-- Live tail-following is Chromium-only (File System Access API); other browsers
-  show a hint and everything else works. Same-size file rewrites between polls
-  are undetectable (inherent to size polling, same class as `tail -f`).
+- Live tail-following and folder watching are Chromium-only (File System
+  Access API); other browsers show a hint and everything else works. Same-size
+  file rewrites between polls are undetectable (inherent to size polling, same
+  class as `tail -f`); the folder monitor watches top-level files only and a
+  same-name delete+recreate is not detected as new content (see
+  `MILESTONE-4.md`).
 - The SQL report engine lazy-loads ~39 MB of WASM on first Run (kept out of the
   main bundle; subsequent runs use it from disk cache).

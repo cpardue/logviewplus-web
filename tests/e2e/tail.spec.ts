@@ -93,12 +93,16 @@ test('rotated file is re-parsed from byte 0 (entries reset, not duplicated)', as
   await expect.poll(() => count(page), { timeout: 10_000 }).toBe(3)
 })
 
-test('non-Chromium: picker missing → button hidden, notice shown, no crash', async ({ page }) => {
-  // Shadow the prototype accessor with undefined — the app must feature-detect.
+test('non-Chromium: pickers missing → buttons hidden, notice shown, no crash', async ({ page }) => {
+  // Shadow the prototype accessors with undefined — the app must feature-detect.
+  // (Both are Chromium-only and absent together in real non-Chromium browsers;
+  // dir.spec.ts covers the same degrade path via the directory buttons.)
   await page.addInitScript(() => {
     Object.defineProperty(window, 'showOpenFilePicker', { value: undefined, configurable: true })
+    Object.defineProperty(window, 'showDirectoryPicker', { value: undefined, configurable: true })
   })
   await page.goto('/')
   await expect(page.getByTestId('tail-button')).toHaveCount(0)
+  await expect(page.getByTestId('dir-button')).toHaveCount(0)
   await expect(page.getByTestId('tail-unsupported')).toBeVisible()
 })
