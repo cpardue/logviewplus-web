@@ -1,4 +1,4 @@
-const DEFAULT_CHUNK = 1024 * 1024 // 1 MiB
+export const DEFAULT_CHUNK = 1024 * 1024 // 1 MiB
 
 export interface TextChunk {
   text: string

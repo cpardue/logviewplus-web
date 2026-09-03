@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLogStore } from './store/logStore'
 import { applyFilters } from './lib/filters'
 import { pasteFileName, textToFile } from './lib/ingest'
+import { isTailSupported } from './lib/tail'
 import Toolbar from './components/Toolbar'
 import FilterBar from './components/FilterBar'
 import ExportBar from './components/ExportBar'
@@ -9,6 +10,8 @@ import LogGrid from './components/LogGrid'
 import ReportBar from './components/ReportBar'
 
 const EMPTY_ROWS: never[] = []
+// Evaluated once per page load — the File System Access API is either there (Chromium) or not.
+const TAIL_SUPPORTED = isTailSupported()
 
 export default function App() {
   const files = useLogStore(s => s.files)
@@ -16,6 +19,7 @@ export default function App() {
   const filters = useLogStore(s => s.filters)
   const merged = useLogStore(s => s.merged)
   const addFiles = useLogStore(s => s.addFiles)
+  const startTail = useLogStore(s => s.startTail)
   const setActive = useLogStore(s => s.setActive)
   const setMerged = useLogStore(s => s.setMerged)
   const [dragOver, setDragOver] = useState(false)
@@ -56,6 +60,20 @@ export default function App() {
       if (text.trim()) addFiles([textToFile(text, pasteFileName())])
     } catch {
       // Clipboard API unavailable (permission/agent) — ignore.
+    }
+  }
+
+  /** Ask for a file handle (Chromium File System Access API) and tail it. */
+  async function pickAndTail() {
+    if (!window.showOpenFilePicker) return // non-Chromium — button is hidden anyway
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        types: [{ description: 'Log files', accept: { 'text/plain': ['.log', '.txt', '.out'] } }],
+        multiple: false,
+      })
+      startTail(handle)
+    } catch {
+      // User cancelled the picker (AbortError) — nothing to do.
     }
   }
 
@@ -104,6 +122,7 @@ export default function App() {
               }}
             >
               {files[id].name}
+              {files[id].tail && <span className="tab-tail" title="Live tailing"> ●</span>}
               {files[id].status === 'parsing' ? ' …' : ''}
             </button>
           ))}
@@ -121,6 +140,15 @@ export default function App() {
         <button className="btn" data-testid="paste-button" onClick={() => void pasteFromClipboard()}>
           Paste
         </button>
+        {TAIL_SUPPORTED ? (
+          <button className="btn" data-testid="tail-button" onClick={() => void pickAndTail()}>
+            Tail live…
+          </button>
+        ) : (
+          <span className="tail-hint" data-testid="tail-unsupported">
+            Live tail needs Chrome or Edge
+          </span>
+        )}
         <input
           ref={inputRef}
           data-testid="file-input"

@@ -3,8 +3,8 @@
 > **Read this first in every new session.** Companion docs: `PLAN.md`,
 > `MILESTONE-1.md`, `README.md`, `tests/perf.md`, and the history file at
 > `../history/logviewplus-web.md` (one level up, outside the repo).
-> Last updated: 2026-09-02 ~20:40 — M3 checkpoint A COMPLETE (DuckDB-WASM SQL
-> reporting + Report tab, gates green); next: M3 checkpoint B (tail-following).
+> Last updated: 2026-09-03 ~07:15 — M3 checkpoint B COMPLETE (tail-following,
+> gates green); next: M3 checkpoint C (100 MB perf investigation + closeout).
 
 ## 0. Where we are (TL;DR)
 
@@ -36,10 +36,22 @@
   `MILESTONE-3.md` as-built notes: apache-arrow v17 Table-construction quirks
   (all-nullable schema required) and the duckdb-wasm#1966 broken exception
   shim that hides real SQL error text (mapper now detects it and explains).
-- Next up: **M3 checkpoint B** — tail-following (File System Access API,
-  Chromium-only, feature-detected), then checkpoint C (100 MB perf
-  investigation + closeout; `tests/perf.md` M3 section, README refresh,
-  history entries).
+- **M3 checkpoint B COMPLETE — 2026-09-03**: live tail-following of growing
+  files. `src/lib/tail.ts` = DOM-free `TailFeed` (byte offset + ONE persistent
+  streaming TextDecoder + poll classification text/none/rotate/removed; two
+  documented size-polling blind spots) + FSA `HandleSource`/`isTailSupported`.
+  `pipeline.startTail` keeps the parse worker OPEN (no `finish`) so lineNo/seq
+  keep counting across polls; initial read 1 MiB-chunked, then 1 s poll loop.
+  Rotation = epoch-bumped worker `reset` + `resetAck` (FIFO ⇒ clear stored rows
+  only after ack — zero lost/dup entries), re-read from byte 0. File flips to
+  `ready` after the initial read; appended rows flow through the normal grid
+  path. Removed file keeps its rows, `tail` flag clears. UI: "Tail live…"
+  button (Chromium only; other browsers get a hint, verified by E2E), ● dot on
+  the tab + toolbar badge. Gates: lint / 130 unit (19 files) / build / 13 e2e
+  (+2 perf skips) incl. new `tests/e2e/tail.spec.ts` (stubbed picker via
+  addInitScript: append 10→15, rotation 5→3, non-Chromium degrade).
+- Next up: **M3 checkpoint C** — 100 MB perf investigation + closeout
+  (`tests/perf.md` M3 section, README refresh, NEXT-STEPS §0, history entries).
 
 ## 1. ~~Immediate task: enable Pages, verify live site~~ — DONE 2026-09-02
 
@@ -172,7 +184,10 @@ $env:PERF='1'; $env:PERF_100='1'; npx playwright test   # all 3 incl. 100 MB gat
 
 ## 5. Repo map (where things live) — M1 snapshot; M2 added the `src/parsers/*`
 breadth (Json/W3c/Combined/Dsv/XmlLog4j + detect/factory), `src/lib/{ingest,filters-db,export}.ts`,
-and `src/components/ExportBar.tsx`
+and `src/components/ExportBar.tsx`; M3 added `src/lib/sql/*` (DuckDB-WASM engine
+over an Arrow `entries` table), `src/store/reportStore.ts`,
+`src/components/{ReportBar,ReportGrid}.tsx`, `src/lib/tail.ts` (+ `startTail` in
+pipeline + worker `reset`/epoch protocol), and `tests/e2e/{report,tail}.spec.ts`
 
 ```
 src/parsers/        pure parser core: types.ts, levels.ts, timestamps.ts,

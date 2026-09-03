@@ -47,14 +47,15 @@ raw parse result — not the filtered grid rows. Result display is capped at
    E2E report spec). DuckDB lazy-loads on first Run (main JS + ~38 MB wasm
    ship as Vite `?url` assets; never in the main bundle).
 2. **Checkpoint B — Tail-following** (`src/lib/tail.ts`, store wiring, unit
-   tests for the size-diff/rotation logic, E2E with a stubbed picker).
+   tests for the size-diff/rotation logic, E2E with a stubbed picker) — DONE
+   2026-09-03 (see as-built notes below).
 3. **Checkpoint C — Perf investigation + closeout** (100 MB quiet-machine run,
    `tests/perf.md` M3 section, README refresh, NEXT-STEPS §0, history entries).
 
 ## Checkpoint status
 
 - [x] A — DuckDB-WASM SQL engine + Report tab (2026-09-02)
-- [ ] B — tail-following
+- [x] B — tail-following (2026-09-03)
 - [ ] C — perf investigation + closeout
 
 ## Acceptance criteria (Definition of Done)
@@ -67,7 +68,7 @@ raw parse result — not the filtered grid rows. Result display is capped at
       DEBUG 7 / TRACE 3 / no-level 1)
 - [x] Arrow ingest of the 40-entry fixture round-trips all columns incl. nulls
       (unit-tested pure layer; E2E asserts query results)
-- [ ] Tail-following appends new lines to a running file tab (Chromium);
+- [x] Tail-following appends new lines to a running file tab (Chromium);
       non-Chromium degrades gracefully (feature-detect, no crash)
 - [ ] 100 MB perf: quiet-machine number + verdict in `tests/perf.md`
 - [ ] README updated; NEXT-STEPS §0 truthful; history entries written
@@ -116,3 +117,42 @@ raw parse result — not the filtered grid rows. Result display is capped at
    browser context downloads + compiles the wasm; on this machine the whole
    report spec passes in ~7 s, so generous 180 s poll timeouts are headroom,
    not expectations.
+
+### Checkpoint B (tail-following) as-built
+
+- **Pure core, DOM-free:** `src/lib/tail.ts` — `TailFeed` tracks a byte offset
+  over an injected `TailSource` (`stat()`/`slice()`) and classifies every poll
+  as `text` (growth), `none`, `rotate` (size < last observed size) or
+  `removed` (handle no longer resolves). ONE persistent streaming `TextDecoder`
+  spans all reads, so multi-byte UTF-8 characters split across poll boundaries
+  decode correctly (unit-tested). Initial read chunks at 1 MiB (`next(1MiB)`),
+  steady-state polls use `Infinity`.
+- **Two documented blind spots** (inherent to size polling, same class as
+  `tail -f`): same-size rewrites undetectable; grow-then-shrink *between two
+  polls* ending larger than the last observed size slips through.
+- **Worker reset + epoch guard:** rotation posts `{type:'reset'}` — the worker
+  rebuilds its `ParseEngine` (fresh line/seq counters, same detected spec) and
+  replies `{type:'resetAck'}`. All outbound messages now carry an `epoch`.
+  Because worker→main delivery is FIFO, awaiting the ack before clearing stored
+  rows guarantees zero lost/duplicated entries (pre-reset rows are all already
+  delivered by then). The re-read of the rotated file starts at byte 0 in the
+  same pump iteration.
+- **Session stays open:** `startTail` never sends `finish`, so the engine's
+  partial-line buffer carries the trailing incomplete line across polls and
+  `lineNo`/`seq` keep counting. File flips to `ready` after the initial read
+  (`onInitial`) — appended rows flow into the same grid path (batch-level
+  re-filter is fine at tail cadence; the M1 O(n²) gotcha only bit during
+  whole-file initial parses).
+- **FSA adapter + degrade:** `HandleSource` calls `handle.getFile()` per poll
+  (`NotFoundError` → stat −1 → `removed`: existing rows stay, `tail` flag
+  clears via `onStopped`). `window.showOpenFilePicker` is absent from TS
+  `lib.dom` → minimal ambient declaration in `src/vite-env.d.ts`. Non-Chromium:
+  `isTailSupported()` false → Tail button not rendered, "Live tail needs
+  Chrome or Edge" hint shown (verified by E2E via a defineProperty shadow).
+- **E2E stubbed picker** (`tests/e2e/tail.spec.ts`): `addInitScript` installs a
+  fake `showOpenFilePicker` (own property via `Object.defineProperty` — plain
+  assignment could no-op if Chromium exposes it setter-less) backed by an
+  in-memory byte buffer; each `getFile()` returns a fresh `File` snapshot, and
+  the test grows/replaces the buffer between polls. Three specs: append
+  (10→15 entries), rotation (5→3, would be 8 without reset), unsupported
+  browser degrade. All pass in ~2–3 s with the default 1 s poll interval.

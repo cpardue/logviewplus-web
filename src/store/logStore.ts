@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import type { LogEntry, LogLevel } from '../parsers/types'
 import { EMPTY_FILTERS, type Filters } from '../lib/filters'
-import { startParse, type ParseSession } from '../lib/pipeline'
+import { startParse, startTail, type ParseSession } from '../lib/pipeline'
+import { HandleSource } from '../lib/tail'
 import { ingestZip } from '../lib/ingest'
 
 export interface FileState {
@@ -15,6 +16,8 @@ export interface FileState {
   startedAt: number
   finishedAt: number | null
   entries: LogEntry[]
+  /** True while a live tail is appending to this file (Chromium only). */
+  tail?: boolean
   error?: string
 }
 
@@ -27,6 +30,8 @@ interface LogState {
   /** "All" merged view across every ready file. */
   merged: boolean
   addFiles(list: FileList | File[]): void
+  /** Start tail-following a File System Access API handle (Chromium only). */
+  startTail(handle: FileSystemFileHandle): void
   removeFile(id: string): void
   setActive(id: string | null): void
   setMerged(on: boolean): void
@@ -173,6 +178,109 @@ export const useLogStore = create<LogState>((set, get) => ({
           ),
         )
       }
+    })()
+  },
+
+  startTail(handle) {
+    void (async () => {
+      let size: number
+      try {
+        size = (await handle.getFile()).size
+      } catch {
+        return // handle already dead — nothing to tail
+      }
+      const id = `f${nextId++}`
+      set(s => ({
+        files: {
+          ...s.files,
+          [id]: {
+            id,
+            name: handle.name,
+            size,
+            status: 'parsing',
+            fraction: 0,
+            lines: 0,
+            startedAt: performance.now(),
+            finishedAt: null,
+            entries: [],
+            tail: true,
+          },
+        },
+        // Live tail is meant to be watched — switch to it.
+        activeId: id,
+        merged: false,
+      }))
+      const source = new HandleSource(handle)
+      sessions.set(
+        id,
+        startTail(
+          source,
+          {
+            onRows(rows) {
+              set(s => {
+                const f = s.files[id]
+                if (!f || f.status === 'error') return s
+                return { files: { ...s.files, [id]: { ...f, entries: [...f.entries, ...rows] } } }
+              })
+            },
+            onProgress(lines, _entries, bytes) {
+              set(s => {
+                const f = s.files[id]
+                if (!f || f.status === 'error') return s
+                return {
+                  files: {
+                    ...s.files,
+                    [id]: { ...f, lines, fraction: f.size > 0 ? Math.min(1, bytes / f.size) : 0 },
+                  },
+                }
+              })
+            },
+            // Initial read done — usable; appended rows keep flowing after this.
+            onInitial() {
+              set(s => {
+                const f = s.files[id]
+                if (!f) return s
+                return {
+                  files: { ...s.files, [id]: { ...f, status: 'ready', fraction: 1, finishedAt: performance.now() } },
+                }
+              })
+            },
+            // Post-reset ack: safe to drop pre-rotation rows; refresh displayed size.
+            onRotation() {
+              void (async () => {
+                let rotatedSize = size
+                try {
+                  rotatedSize = await source.stat()
+                } catch {
+                  // keep the last known size
+                }
+                set(s => {
+                  const f = s.files[id]
+                  if (!f) return s
+                  return { files: { ...s.files, [id]: { ...f, entries: [], lines: 0, size: rotatedSize } } }
+                })
+              })()
+            },
+            onStopped() {
+              set(s => {
+                const f = s.files[id]
+                if (!f) return s
+                return { files: { ...s.files, [id]: { ...f, tail: false } } }
+              })
+            },
+            onError(message) {
+              set(s => {
+                const f = s.files[id]
+                if (!f) return s
+                return {
+                  files: { ...s.files, [id]: { ...f, status: 'error', error: message, finishedAt: performance.now() } },
+                }
+              })
+            },
+          },
+          { tzMode: get().tzMode },
+        ),
+      )
     })()
   },
 
