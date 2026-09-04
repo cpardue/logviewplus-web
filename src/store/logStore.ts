@@ -12,6 +12,18 @@ import { loadHighlights, saveHighlight, deleteHighlight, replaceHighlights } fro
 import { makeHighlight, type Highlight } from '../lib/highlights'
 import { listSavedFilters, saveFilter, type SavedFilter } from '../lib/filters-db'
 import { downloadBlob } from '../lib/export'
+import { loadWebhook, saveWebhook } from '../lib/webhook-db'
+import {
+  EMPTY_WEBHOOK,
+  MAX_ENTRIES_PER_POST,
+  buildEntriesPayload,
+  buildTestPayload,
+  isArmed,
+  postWebhook,
+  toWebhookItems,
+  webhookMatches,
+  type WebhookConfig,
+} from '../lib/webhook'
 import {
   WorkspaceError,
   buildWorkspace,
@@ -58,6 +70,10 @@ interface LogState {
   highlights: Highlight[]
   /** Bumped by workspace-archive loads so the FilterBar refreshes its saved sets. */
   savedFiltersVersion: number
+  /** Webhook notification target (armed when a URL is set). Persisted. */
+  webhook: WebhookConfig
+  /** Last webhook send outcome for the status line (null = nothing sent yet). */
+  webhookStatus: string | null
   addFiles(list: FileList | File[]): void
   /** Start tail-following a File System Access API handle (Chromium only). */
   startTail(handle: FileSystemFileHandle): void
@@ -89,6 +105,10 @@ interface LogState {
    * {@link WorkspaceError} with a user-facing message on unreadable/invalid input.
    */
   loadWorkspace(file: File): Promise<void>
+  /** Replace the webhook config (armed when a URL is set); persists to IndexedDB. */
+  setWebhook(config: WebhookConfig): void
+  /** Fire a one-off test POST at the configured URL (no-op when unarmed). */
+  testWebhook(): Promise<void>
 }
 
 const sessions = new Map<string, ParseSession>()
@@ -141,16 +161,100 @@ async function expand(list: File[]): Promise<{ files: File[]; failures: { name: 
 function appendRows(id: string, rows: LogEntry[], set: (fn: (s: LogState) => Partial<LogState>) => void, get: () => LogState): void {
   const f = get().files[id]
   if (!f || f.status === 'error') return
+  // Rows appended to an ALREADY-READY file are live appends (tail poll, or the
+  // re-read after in-place rotation — genuinely new log events). Batches that
+  // arrive while the initial read is still `parsing` are history replay of an
+  // opened file and must never fire notifications.
+  const live = f.status === 'ready'
   f.entries.push(...rows)
   set(s => {
     const cur = s.files[id]
     if (!cur) return s
     return { files: { ...s.files, [id]: { ...cur } } }
   })
+  if (live) collectWebhookMatches(rows, set, get)
 }
 
 type StoreSet = (fn: (s: LogState) => Partial<LogState>) => void
 type StoreGet = () => LogState
+
+/** Coalesce window for webhook batches: one POST per second of matched entries. */
+const WEBHOOK_FLUSH_MS = 1000
+/**
+ * Hard backlog cap: a spew far outpacing the ~50/s drain drops the OLDEST
+ * matches first (the newest is what on-call wants to see).
+ */
+const MAX_WEBHOOK_PENDING = 1000
+
+/** Matching live-appended entries awaiting a webhook flush. */
+let webhookPending: LogEntry[] = []
+/** Scheduled flush timer (null when no flush is pending). */
+let webhookTimer: number | null = null
+/** Serializes sends so overlapping flushes/test clicks can't interleave requests. */
+let webhookChain: Promise<void> = Promise.resolve()
+
+function setWebhookStatus(set: StoreSet, status: string): void {
+  set(() => ({ webhookStatus: status }))
+}
+
+function collectWebhookMatches(rows: LogEntry[], set: StoreSet, get: StoreGet): void {
+  const cfg = get().webhook
+  if (!isArmed(cfg)) return
+  const matches = rows.filter(e => webhookMatches(e, cfg))
+  if (matches.length === 0) return
+  webhookPending.push(...matches)
+  if (webhookPending.length > MAX_WEBHOOK_PENDING) {
+    webhookPending.splice(0, webhookPending.length - MAX_WEBHOOK_PENDING)
+  }
+  if (webhookPending.length >= MAX_ENTRIES_PER_POST) {
+    // Spewing log: send immediately instead of waiting out the window.
+    if (webhookTimer != null) {
+      clearTimeout(webhookTimer)
+      webhookTimer = null
+    }
+    flushWebhook(set, get)
+  } else if (webhookTimer == null) {
+    webhookTimer = window.setTimeout(() => {
+      webhookTimer = null
+      flushWebhook(set, get)
+    }, WEBHOOK_FLUSH_MS)
+  }
+}
+
+function flushWebhook(set: StoreSet, get: StoreGet): void {
+  if (webhookPending.length === 0) return
+  const url = get().webhook.url.trim()
+  if (url === '') {
+    // Disarmed between collect and flush — drop the backlog silently.
+    webhookPending = []
+    return
+  }
+  // One batch may hold far more than the per-POST cap → split into multiple
+  // serialized POSTs of at most MAX_ENTRIES_PER_POST entries each.
+  const batches: LogEntry[][] = []
+  while (webhookPending.length > 0) {
+    batches.push(webhookPending.splice(0, MAX_ENTRIES_PER_POST))
+  }
+  for (const batch of batches) sendWebhookBatch(url, batch, set)
+}
+
+function sendWebhookBatch(url: string, entries: LogEntry[], set: StoreSet): void {
+  const items = toWebhookItems(entries)
+  setWebhookStatus(set, `Sending ${items.length} matching entr${items.length === 1 ? 'y' : 'ies'}…`)
+  webhookChain = webhookChain
+    .then(async () => {
+      const result = await postWebhook(url, buildEntriesPayload(items))
+      setWebhookStatus(
+        set,
+        result.ok
+          ? `Sent ${items.length} entr${items.length === 1 ? 'y' : 'ies'} → HTTP ${result.status}`
+          : `Send failed: ${result.error ?? 'unknown error'}`,
+      )
+    })
+    .catch(() => {
+      setWebhookStatus(set, 'Send failed: unexpected error')
+    })
+}
 
 /**
  * Create a FileState and an open-ended tail session for a tailable source;
@@ -287,6 +391,8 @@ export const useLogStore = create<LogState>((set, get) => ({
    * (a workspace-archive load) so the bar re-reads IndexedDB.
    */
   savedFiltersVersion: 0,
+  webhook: { ...EMPTY_WEBHOOK },
+  webhookStatus: null,
 
   addFiles(list) {
     void (async () => {
@@ -504,6 +610,31 @@ export const useLogStore = create<LogState>((set, get) => ({
       })
   },
 
+  setWebhook(config) {
+    set({ webhook: config })
+    void saveWebhook(config)
+      .then(() => {
+        // Test hook: E2E waits on this commit marker before reloading the page.
+        ;(window as unknown as { __webhookSavedAt?: number }).__webhookSavedAt = Date.now()
+      })
+      .catch(() => {
+        // DB unavailable — the config still applies for this session.
+      })
+  },
+
+  async testWebhook() {
+    const url = get().webhook.url.trim()
+    if (url === '') return // unarmed — nothing to test
+    setWebhookStatus(set, 'Sending test…')
+    await webhookChain.then(async () => {
+      const result = await postWebhook(url, buildTestPayload())
+      setWebhookStatus(
+        set,
+        result.ok ? `Test sent → HTTP ${result.status}` : `Test failed: ${result.error ?? 'unknown error'}`,
+      )
+    })
+  },
+
   pinRow(entry) {
     const file = entry.file ?? ''
     if (get().highlights.some(h => h.file === file && h.lineNo === entry.lineNo)) return
@@ -595,3 +726,5 @@ function persistHighlight(write: () => Promise<void>): void {
 void loadRules().then(rules => useLogStore.setState({ rules }))
 // Same for pinned notes (grid redraw picks them up on arrival).
 void loadHighlights().then(highlights => useLogStore.setState({ highlights }))
+// …and the webhook target (the WebhookBar inputs pick it up on arrival).
+void loadWebhook().then(webhook => useLogStore.setState({ webhook }))

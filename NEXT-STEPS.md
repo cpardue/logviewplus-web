@@ -3,15 +3,18 @@
 > **Read this first in every new session.** Companion docs: `PLAN.md`,
 > `MILESTONE-1.md`, `README.md`, `tests/perf.md`, and the history file at
 > `../history/logviewplus-web.md` (one level up, outside the repo).
-> Last updated: 2026-09-04 — **M4 in progress**: checkpoints A + B + C + D
-> + E DONE (directory monitor; rules & row coloring — persisted user rules →
-> grid row colors, first match wins; highlights/bookmarks/notes — right-click
-> pin + note, persisted → accent bar + NotesBar, exact file:line identity;
-> workspace archive save/share — one JSON file bundles saved filters + rules +
-> pins + active filter + tz mode + per-file metadata, re-openable in any
-> profile/machine; local `.sqlite` open — sql.js table browser behind a SQLite
-> tab, `.sqlite`/`.db` routed away from the parser); next: M4 checkpoint F
-> (webhook notifications + closeout), see `MILESTONE-4.md`.
+> Last updated: 2026-09-04 — **M4 COMPLETE**: checkpoints A–F DONE (directory
+> monitor; rules & row coloring — persisted user rules → grid row colors,
+> first match wins; highlights/bookmarks/notes — right-click pin + note,
+> persisted → accent bar + NotesBar, exact file:line identity; workspace
+> archive save/share — one JSON file bundles saved filters + rules + pins +
+> active filter + tz mode + per-file metadata, re-openable in any profile/
+> machine; local `.sqlite` open — sql.js table browser behind a SQLite tab,
+> `.sqlite`/`.db` routed away from the parser; webhook notifications — LIVE-
+> appended entries matching text/level/file POSTed as JSON batches to a user
+> URL (1 s coalescing, ≤ 50 per POST, serialized sends, test button, config
+> persisted), replacing the original's command-line provider) — see
+> `MILESTONE-4.md`. Next: M5 polish (§0).
 
 ## 0. Where we are (TL;DR)
 
@@ -171,11 +174,30 @@
   lint / 184 unit (24 files) / build / 37 e2e incl. both perf gates —
   10 MB 483 ms, 100 MB 4011 ms — no regression (M4-D 475/4066). Full notes +
   limitations in `MILESTONE-4.md`.
-- Next up: **M4 checkpoint F — webhook notifications + closeout** (README
-  refresh, NEXT-STEPS §0, history entries) — per `MILESTONE-4.md`. Then M5
-  polish
-  (encodings/culture, 1 GB+ perf pass: main-thread decode move + columnar
-  storage per `tests/perf.md`, a11y, docs).
+- **M4 checkpoint F COMPLETE — 2026-09-04 (M4 DONE)**: webhook notifications
+  (replaces the original's command-line provider). `src/lib/webhook.ts` =
+  DOM-free core (`WebhookConfig { url, text, levels, file }` — armed ⟺ non-
+  blank URL; condition semantics mirror rules/filters; payload items w/ ISO
+  ts + 2000-char message truncation; entries/test payloads; `postWebhook` —
+  POST JSON w/ AbortController 5 s timeout that NEVER throws, injectable
+  `fetchImpl`; `sanitizeWebhook`). Trigger lives in `logStore.appendRows`:
+  rows appended to an ALREADY-`ready` file are live events (tail poll,
+  monitor ingest, post-rotation re-read) and get matched; initial-parse
+  history never fires — loading a file sends nothing. Coalescing: 1 s flush
+  timer, immediate flush at the 50-entry cap, over-cap backlogs split into
+  ≤ 50-entry POSTs, all sends serialized on one promise chain, 1000-entry
+  backlog cap drops oldest first. UI: `WebhookBar` (URL/text/level/file +
+  "Send test" + status line). Config persists in a new IndexedDB `webhooks`
+  store (shared handle v3 → v4) with a `__webhookSavedAt` commit marker;
+  deliberately NOT bundled into the v1 workspace archive. New
+  `tests/unit/webhook.test.ts` (20 tests) + `tests/e2e/webhook.spec.ts`
+  (4 specs, fetch stubbed via addInitScript: live-append fires + initial-
+  parse silence, test POST shape, reload persistence, HTTP 500 surfaced in
+  status line with parsing unaffected). Gates: lint / 204 unit (25 files) /
+  build / 41 e2e incl. both perf gates — 10 MB 577 ms, 100 MB 3924 ms — no
+  regression (M4-E 483/4011). Full notes + limitations in `MILESTONE-4.md`.
+- Next up: **M5 polish** — encodings/culture, 1 GB+ perf pass (main-thread
+  decode move + columnar storage per `tests/perf.md`), a11y, docs.
 
 ## 1. ~~Immediate task: enable Pages, verify live site~~ — DONE 2026-09-02
 
@@ -242,18 +264,18 @@ Steps actually taken (kept for reference):
 
 ```
 npm run lint
-npm test                      # 184 unit tests (24 files), ~1.4 s
+npm test                      # 204 unit tests (25 files), ~1.5 s
 npm run build                 # tsc -b && vite build → dist/
 npm run gen:logs -- 10        # deterministic fixtures (seeded; 10MB=139769 lines, 100MB=1397688)
 npm run gen:sqlite            # deterministic .sqlite fixture (committed at tests/fixtures/sqlite/)
 npm run build                 # REQUIRED before e2e (playwright webServer serves dist via vite preview)
-npm run test:e2e              # 35 tests: app/merge/zip/paste/saved-filters/export/report/tail/dir/rules/highlights/workspace/sqlite chains + (PERF-gated) perf
-$env:PERF='1'; $env:PERF_100='1'; npx playwright test   # 37 incl. both perf gates (~15 s on a quiet pass)
+npm run test:e2e              # 39 tests: app/merge/zip/paste/saved-filters/export/report/tail/dir/rules/highlights/workspace/sqlite/webhook chains + (PERF-gated) perf
+$env:PERF='1'; $env:PERF_100='1'; npx playwright test   # 41 incl. both perf gates (~15 s on a quiet pass)
 ```
 
 - Chromium is already installed (`npx playwright install chromium` if a fresh
   Playwright version demands re-download).
-- Expected: unit 161/161; E2E counts 40 → (WARN) 7 → (+“config”) 1; dir spec
+- Expected: unit 204/204; E2E counts 40 → (WARN) 7 → (+“config”) 1; dir spec
   All-view total 15 (10+5 entries); perf 10 MB < 5 s gate, 100 MB completes +
   scroll check (~4.5 s measured on this machine, 2026-09-03).
 - Quick API checks without a probe file: use MCP `github__get_repo` for repo
@@ -326,7 +348,13 @@ refresh, `replaceHighlights` in highlights-db) and `tests/{unit/workspace.test.t
 M4-E added `src/lib/sqlite/{engine,result}.ts` (lazy sql.js engine + DOM-free core),
 `src/store/sqliteStore.ts`, `src/components/SqliteBar.tsx` (+ header "SQLite" tab in App),
 `.sqlite`/`.db` routing in `logStore.addFiles`, `scripts/gen-sqlite-fixture.mjs` and
-`tests/{unit/sqlite.test.ts, e2e/sqlite.spec.ts}` + fixture `tests/fixtures/sqlite/sample.sqlite`
+`tests/{unit/sqlite.test.ts, e2e/sqlite.spec.ts}` + fixture `tests/fixtures/sqlite/sample.sqlite`;
+M4-F added `src/lib/webhook.ts` (DOM-free core: config/sanitize, matching, payload
+builders, never-throwing `postWebhook` w/ timeout) + `src/lib/webhook-db.ts` (new
+IndexedDB `webhooks` store; shared handle v3 → v4), the webhook feed in `logStore`
+(pending buffer / 1 s flush / ≤ 50 per POST / serialized chain inside `appendRows`,
+`setWebhook`/`testWebhook`), `src/components/WebhookBar.tsx`, and
+`tests/{unit/webhook.test.ts, e2e/webhook.spec.ts}` (fetch stubbed via addInitScript)
 
 ```
 src/parsers/        pure parser core: types.ts, levels.ts, timestamps.ts,

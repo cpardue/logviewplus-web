@@ -8,6 +8,7 @@ import Toolbar from './components/Toolbar'
 import FilterBar from './components/FilterBar'
 import RulesBar from './components/RulesBar'
 import NotesBar from './components/NotesBar'
+import WebhookBar from './components/WebhookBar'
 import ExportBar from './components/ExportBar'
 import LogGrid from './components/LogGrid'
 import ReportBar from './components/ReportBar'
@@ -259,6 +260,7 @@ export default function App() {
           <FilterBar />
           <RulesBar />
           <NotesBar />
+          <WebhookBar />
           <ExportBar rows={rows} label={merged ? 'all-files' : (active?.name ?? 'log')} />
           <section className="grid-wrap">
             {merged || active ? (

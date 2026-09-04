@@ -10,25 +10,30 @@ Intended for personal/internal use (GitHub Pages ToS prohibits commercial SaaS).
 
 ## Status
 
-**Milestone 4 in progress (2026-09-04):** checkpoints A + B + C + D + E done —
-**Watch folder…**: a live directory monitor (File System Access API,
-Chromium-only, feature-detected) that ingests and tail-follows new log files
-as they appear in the picked folder; removed files keep their rows. **Rules &
-row coloring**: user-defined text / level / file match rules color grid rows
-(first matching rule wins, overrides the built-in level tints), persisted in
-IndexedDB across reloads. **Highlights/bookmarks/notes**: right-click any grid
-row to pin it with a note (accent bar + NotesBar entry with file:line,
-editable text and jump-to-row); pins persist across reloads and follow their
-row into the merged view. **Workspace archive**: Save/Load workspace… bundles
-saved filters, rules, pinned notes, the active filter, the naive-timestamp
-mode and per-file metadata into one JSON file that re-applies in the same or
-another profile/machine (rules replaced, pins + saved filters merged — files
+**Milestone 4 complete (2026-09-04):** all six checkpoints done — **Watch
+folder…**: a live directory monitor (File System Access API, Chromium-only,
+feature-detected) that ingests and tail-follows new log files as they appear
+in the picked folder; removed files keep their rows. **Rules & row coloring**:
+user-defined text / level / file match rules color grid rows (first matching
+rule wins, overrides the built-in level tints), persisted in IndexedDB across
+reloads. **Highlights/bookmarks/notes**: right-click any grid row to pin it
+with a note (accent bar + NotesBar entry with file:line, editable text and
+jump-to-row); pins persist across reloads and follow their row into the merged
+view. **Workspace archive**: Save/Load workspace… bundles saved filters,
+rules, pinned notes, the active filter, the naive-timestamp mode and per-file
+metadata into one JSON file that re-applies in the same or another
+profile/machine (rules replaced, pins + saved filters merged — files
 themselves are re-opened). **SQLite tab**: open a local `.sqlite`/`.db` file
 (sql.js, lazily loaded on first open) and browse its tables — user tables only
 (internal `sqlite_*` excluded), capped at 50k rows with truncation flagged,
 BLOBs shown as byte markers; `.sqlite`/`.db` files dropped via the normal open
-paths route here instead of the log parser. Remaining M4: webhook
-notifications (see `MILESTONE-4.md`).
+paths route here instead of the log parser. **Webhook notifications**: set a
+URL in the Webhook bar and every LIVE-appended entry matching text / level /
+file conditions is POSTed there as a small JSON batch (coalesced into ≤ 1 s
+windows, ≤ 50 entries per POST; initial-load history never fires; "Send test"
+fires a one-off probe; failures surface in the status line) — the web
+replacement for the original's command-line provider. See `MILESTONE-4.md`
+for as-built notes and limitations.
 
 **Milestone 3 complete (2026-09-03):** on top of M2 — a Report tab with real
 SQL over the parsed entries (DuckDB-WASM in a worker, lazily loaded on first
@@ -48,7 +53,7 @@ CSV/JSON export of the filtered rows.
 - `MILESTONE-1.md` — M1 tasks + acceptance criteria (done)
 - `MILESTONE-2.md` — M2 tasks + acceptance criteria (done)
 - `MILESTONE-3.md` — M3 tasks + acceptance criteria (done)
-- `MILESTONE-4.md` — M4 power features: tasks, checkpoints A–E as-built, limitations
+- `MILESTONE-4.md` — M4 power features: tasks, checkpoints A–F as-built, limitations
 - `tests/perf.md` — measured performance numbers (M1, M2 re-check, M3 closeout)
 
 ## Usage
@@ -78,8 +83,14 @@ Chromium only) and a **SQLite** tab (open a local `.sqlite`/`.db` file and
 browse its tables — sql.js is lazily loaded on first open, rows are capped at
 50k with truncation flagged, BLOBs show as byte markers; `.sqlite`/`.db` files
 dropped through the normal open paths route here instead of being parsed as
-logs). All parsing happens locally in your
-browser — files are never uploaded.
+logs); and a **Webhook bar** (set a URL — while armed, every live-appended
+entry matching the text / level / file conditions is POSTed to it as a small
+JSON batch, coalesced into ≤ 1 s windows with ≤ 50 entries per POST; opening
+a file never fires anything, only new growth does — plus "Send test" for a
+one-off probe and a status line showing each send's outcome). All parsing
+happens locally in your
+browser — files are never uploaded (the only outgoing traffic is an explicit
+webhook POST you configure to your own URL).
 
 ```
 npm install
@@ -131,3 +142,10 @@ Details, verdict on the M2 drift, and how to reproduce: `tests/perf.md`.
   (re-open the file) and it is not bundled into the workspace archive;
   browsing is read-only, tables only (no views), and multiple `.sqlite`/`.db`
   files dropped at once resolve last-wins (see `MILESTONE-4.md`).
+- Webhook notifications fire only for LIVE appends (rows arriving after a file
+  first loads) — opening or reloading a file never POSTs. There is no retry and
+  the endpoint should tolerate bursts (sends serialize, 5 s timeout each,
+  1000-entry backlog cap dropping the oldest matches first). The target must
+  allow cross-origin `POST application/json` from the page origin (browser CORS,
+  preflight included). The webhook config is per-profile (IndexedDB) and is not
+  bundled into the workspace archive (see `MILESTONE-4.md`).

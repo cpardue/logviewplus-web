@@ -34,7 +34,7 @@ rules & row coloring, workspace archive save/share, and webhook notifications
 4. Checkpoint D — workspace archive save/share — DONE 2026-09-03 (as-built notes below).
 5. Checkpoint E — local `.sqlite` open (sql.js) — DONE 2026-09-04 (as-built notes below).
 6. Checkpoint F — webhook notifications + closeout (README refresh,
-   NEXT-STEPS §0, history entries).
+   NEXT-STEPS §0, history entries) — DONE 2026-09-04 (as-built notes below).
 
 ## Checkpoint status
 
@@ -43,7 +43,7 @@ rules & row coloring, workspace archive save/share, and webhook notifications
 - [x] C — highlights/bookmarks/notes (2026-09-03)
 - [x] D — workspace archive save/share (2026-09-03)
 - [x] E — local `.sqlite` open (sql.js) (2026-09-04)
-- [ ] F — webhook notifications + closeout
+- [x] F — webhook notifications + closeout (2026-09-04)
 
 ## Acceptance criteria (Definition of Done — per checkpoint)
 
@@ -79,7 +79,18 @@ rules & row coloring, workspace archive save/share, and webhook notifications
   stay empty; a non-SQLite file surfaces an error without killing the engine
   and a valid file afterwards recovers; `.sqlite`/`.db` files never reach the
   log parser. — MET 2026-09-04.
-- Remaining criteria to be defined per checkpoint as work starts.
+- Checkpoint F: **set a URL in the Webhook bar** (armed only while a URL is
+  present) and every LIVE-appended entry — rows appended to an already-ready
+  file (tail poll, monitor ingest, post-rotation re-read; replayed initial-parse
+  history never fires) — that matches the conditions (text on message OR raw /
+  level / file name, AND; same semantics as rules & filters) is POSTed to the
+  URL as a small JSON batch: coalesced into ≤ 1 s windows, ≤ 50 entries per
+  POST, over-cap backlog drained in serialized batches. **Send test** fires an
+  immediate one-off probe payload. Sends have a per-request timeout and their
+  outcome (HTTP status or error text) lands in the status line — failures never
+  affect parsing/display; the config persists across reloads (IndexedDB). — MET
+  2026-09-04.
+
 
 ## As-built notes
 
@@ -311,7 +322,60 @@ rules & row coloring, workspace archive save/share, and webhook notifications
   incl. both perf gates — 10 MB 483 ms / 100 MB 4011 ms — no regression
   (M4-D baseline 475 ms / 4066 ms).
 
-## Known limitations (M4-A/B/C/D/E; deferred to later checkpoints / M5)
+### Checkpoint F (webhook notifications)
+
+- **DOM-free core** (`src/lib/webhook.ts`): `WebhookConfig { url, text,
+  levels, file }` — armed ⟺ non-blank URL; condition semantics mirror rules
+  and filters (AND; text on message OR raw; empty `levels` = all incl. null;
+  case-insensitive substrings). `toWebhookItems` (50-entry cap, ISO
+  timestamps, messages truncated at 2000 chars with an ellipsis marker),
+  `buildEntriesPayload` / `buildTestPayload` (`{ app: 'logviewplus-web',
+  time, entries[] }` / `{ …, test: true }`), `sanitizeWebhook` for corrupt IDB
+  records, and `postWebhook` — POST `application/json` with an AbortController
+  timeout (default 5 s) that NEVER throws: network/CORS/timeout failures come
+  back as `{ ok, status, error }` for the status line. `fetchImpl` is injectable
+  (unit-tested against fakes; defaults to the global fetch at call time so the
+  module stays Node-safe).
+- **Trigger point = live appends only.** The hook lives in `logStore.appendRows`
+  — the single choke point for BOTH parse and tail row batches. Rows appended
+  while the file is still `parsing` are history replay of an opened file and
+  never fire; rows appended to an already-`ready` file are live events (tail
+  poll, directory-monitor ingest, the re-read after in-place rotation) and are
+  matched against the armed config. Consequence: loading a file sends nothing;
+  only growth after first-ready notifies. (Checkpoint A's same-name
+  delete+recreate blind spot carries over — that re-read is treated as new
+  content.)
+- **Coalescing:** matches accumulate in a module-level pending buffer; a 1 s
+  flush timer drains it, and reaching the 50-entry cap flushes immediately
+  (spew case). Over-cap batches split into multiple ≤ 50-entry POSTs. All
+  sends are serialized on one promise chain (flush vs. "Send test" can't
+  interleave); a hard backlog cap of 1000 pending drops the OLDEST matches
+  first if a spew outruns the ~50/s drain. Disarming the URL between collect
+  and flush drops the backlog silently.
+- **Persistence:** new IndexedDB `webhooks` store (shared handle v3 → v4,
+  contains()-guarded upgrade), single record; auto-saved on every WebhookBar
+  change (`__webhookSavedAt` commit marker for E2E) and restored at startup
+  alongside rules/highlights. The webhook config is deliberately NOT part of
+  the v1 workspace archive (an alerting endpoint is machine-specific
+  infrastructure, not session content — see limitations).
+- **UI:** `WebhookBar` under NotesBar — URL / text / level / file inputs,
+  "Send test" (disabled while unarmed), and a status line rendering
+  `webhookStatus` ("Sent 1 entry → HTTP 200", "Test failed: HTTP 500", …).
+- **E2E** (`tests/e2e/webhook.spec.ts`, 4 specs) with a fetch stub installed
+  via addInitScript (records url+body on `window.__fetchLog`, optional 500
+  mode; no real network): live-appended ERROR line POSTed while the initial
+  parse of 4 lines fired nothing, exact payload shape asserted (file/lineNo/
+  level/message); "Send test" payload shape; reload persistence of all four
+  fields; failed send (HTTP 500) surfaces in the status line and a tail still
+  ingests+renders afterwards. Unit: 20 tests in `tests/unit/webhook.test.ts`
+  (matching, sanitize, items/payloads, postWebhook incl. timeout via an
+  abort-watching fake fetch).
+- **Gates:** lint clean; unit 204/204 (25 files, +20); build ok (no new
+  runtime in the main bundle — webhook.ts is a few kB of glue); e2e 41 passed
+  incl. both perf gates — 10 MB 577 ms / 100 MB 3924 ms — no regression
+  (M4-E baseline 483 ms / 4011 ms).
+
+## Known limitations (M4-A/B/C/D/E/F; deferred to later checkpoints / M5)
 
 - Top-level files only — no recursive subdirectory watch (per-subdir sessions
   would be the natural extension).
@@ -341,3 +405,13 @@ rules & row coloring, workspace archive save/share, and webhook notifications
   bounds the read side); int64 values beyond 2^53 lose precision inside sql.js
   itself (documented upstream limitation — bigints are stringified exactly when
   they do arrive).
+- Webhook notifications fire only for LIVE appends (rows arriving after the
+  file first flips to ready) — opening/reloading a file never notifies, and
+  there is no "notify on initial load" mode. Sends have no retry or
+  backpressure: a spewing log can queue many serialized POSTs (5 s timeout
+  each; 1000-entry backlog cap drops the oldest matches first), so point the
+  hook at an endpoint that tolerates bursts. Browser CORS applies — the target
+  must allow cross-origin `POST application/json` from the page origin
+  (preflight included); failures surface in the status line, never as crashes.
+  The webhook config is per-profile (IndexedDB) and is NOT bundled into the
+  workspace archive.
