@@ -3,14 +3,15 @@
 > **Read this first in every new session.** Companion docs: `PLAN.md`,
 > `MILESTONE-1.md`, `README.md`, `tests/perf.md`, and the history file at
 > `../history/logviewplus-web.md` (one level up, outside the repo).
-> Last updated: 2026-09-03 ~18:10 — **M4 in progress**: checkpoints A + B + C
-> + D DONE (directory monitor; rules & row coloring — persisted user rules →
+> Last updated: 2026-09-04 — **M4 in progress**: checkpoints A + B + C + D
+> + E DONE (directory monitor; rules & row coloring — persisted user rules →
 > grid row colors, first match wins; highlights/bookmarks/notes — right-click
 > pin + note, persisted → accent bar + NotesBar, exact file:line identity;
 > workspace archive save/share — one JSON file bundles saved filters + rules +
 > pins + active filter + tz mode + per-file metadata, re-openable in any
-> profile/machine); next: M4 checkpoint E (local `.sqlite` open, sql.js), see
-> `MILESTONE-4.md`.
+> profile/machine; local `.sqlite` open — sql.js table browser behind a SQLite
+> tab, `.sqlite`/`.db` routed away from the parser); next: M4 checkpoint F
+> (webhook notifications + closeout), see `MILESTONE-4.md`.
 
 ## 0. Where we are (TL;DR)
 
@@ -146,8 +147,33 @@
   lint / 171 unit (23 files) / build / 34 e2e incl. both perf gates —
   10 MB 475 ms, 100 MB 4066 ms — no regression (M4-C 501/4184). Full notes +
   limitations in `MILESTONE-4.md`.
-- Next up: **M4 checkpoint E — local `.sqlite` open (sql.js)**, then F
-  webhook notifications + closeout — per `MILESTONE-4.md`. Then M5 polish
+- **M4 checkpoint E COMPLETE — 2026-09-04**: local `.sqlite` open (sql.js,
+  exact pin 1.14.2). `src/lib/sqlite/engine.ts` = lazy sql.js singleton
+  (dynamic import; glue ~40 kB + wasm ~660 kB as separate assets, fetched on
+  first open — same pattern as the DuckDB report chunk; a failed first init
+  clears the cached promise); readTable runs COUNT(*) then
+  `SELECT * … LIMIT min(total, 50k)` via prepared statement +
+  `getColumnNames()` (runtime-only API, not in @types/sql.js) so big tables
+  never materialize past the shared cap. `src/lib/sqlite/result.ts` = DOM-free
+  core (cell normalization — BLOB → `<binary N bytes>`, exact int64 via bigint
+  stringification; cap + truncation vs engine COUNT; `sqlite_%`-filtered
+  table-name sanitization; double-quoted identifiers). `src/store/sqliteStore.ts`
+  (openFile/selectTable, run-id guard, errors land in status not rejections,
+  `openSeq` commit marker) + `src/components/SqliteBar.tsx` behind a new
+  header "SQLite" tab (table chips → existing `ReportGrid`). `.sqlite`/`.db`
+  files arriving via ANY log-side path are routed to the sqlite store in
+  `logStore.addFiles` before parsing (last wins); App auto-switches views on
+  open. Deterministic fixture: `npm run gen:sqlite` →
+  `tests/fixtures/sqlite/sample.sqlite`. New `tests/unit/sqlite.test.ts`
+  (13 tests) + `tests/e2e/sqlite.spec.ts` (3 specs: exact browse of users/
+  orders incl. NULL→null + BLOB markers + status line, corrupt-file error +
+  engine recovery, main-input routing — 0 parsed rows, no file tab). Gates:
+  lint / 184 unit (24 files) / build / 37 e2e incl. both perf gates —
+  10 MB 483 ms, 100 MB 4011 ms — no regression (M4-D 475/4066). Full notes +
+  limitations in `MILESTONE-4.md`.
+- Next up: **M4 checkpoint F — webhook notifications + closeout** (README
+  refresh, NEXT-STEPS §0, history entries) — per `MILESTONE-4.md`. Then M5
+  polish
   (encodings/culture, 1 GB+ perf pass: main-thread decode move + columnar
   storage per `tests/perf.md`, a11y, docs).
 
@@ -216,12 +242,13 @@ Steps actually taken (kept for reference):
 
 ```
 npm run lint
-npm test                      # 171 unit tests (23 files), ~1.3 s
+npm test                      # 184 unit tests (24 files), ~1.4 s
 npm run build                 # tsc -b && vite build → dist/
 npm run gen:logs -- 10        # deterministic fixtures (seeded; 10MB=139769 lines, 100MB=1397688)
+npm run gen:sqlite            # deterministic .sqlite fixture (committed at tests/fixtures/sqlite/)
 npm run build                 # REQUIRED before e2e (playwright webServer serves dist via vite preview)
-npm run test:e2e              # 32 tests: app/merge/zip/paste/saved-filters/export/report/tail/dir/rules/highlights/workspace chains + (PERF-gated) perf
-$env:PERF='1'; $env:PERF_100='1'; npx playwright test   # 34 incl. both perf gates (~15 s on a quiet pass)
+npm run test:e2e              # 35 tests: app/merge/zip/paste/saved-filters/export/report/tail/dir/rules/highlights/workspace/sqlite chains + (PERF-gated) perf
+$env:PERF='1'; $env:PERF_100='1'; npx playwright test   # 37 incl. both perf gates (~15 s on a quiet pass)
 ```
 
 - Chromium is already installed (`npx playwright install chromium` if a fresh
@@ -295,7 +322,11 @@ shared IDB open); M4-C added `src/lib/{highlights,highlights-db,gridJump}.ts`,
 `src/components/NotesBar.tsx`, DB v2 → v3, the right-click context menu + accent
 bar in `LogGrid.tsx`, and `tests/{unit/highlights.test.ts, e2e/highlights.spec.ts}`; M4-D added
 `src/lib/workspace.ts` (+ store `saveWorkspace`/`loadWorkspace` + `savedFiltersVersion` FilterBar
-refresh, `replaceHighlights` in highlights-db) and `tests/{unit/workspace.test.ts, e2e/workspace.spec.ts}`
+refresh, `replaceHighlights` in highlights-db) and `tests/{unit/workspace.test.ts, e2e/workspace.spec.ts}`;
+M4-E added `src/lib/sqlite/{engine,result}.ts` (lazy sql.js engine + DOM-free core),
+`src/store/sqliteStore.ts`, `src/components/SqliteBar.tsx` (+ header "SQLite" tab in App),
+`.sqlite`/`.db` routing in `logStore.addFiles`, `scripts/gen-sqlite-fixture.mjs` and
+`tests/{unit/sqlite.test.ts, e2e/sqlite.spec.ts}` + fixture `tests/fixtures/sqlite/sample.sqlite`
 
 ```
 src/parsers/        pure parser core: types.ts, levels.ts, timestamps.ts,

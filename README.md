@@ -10,7 +10,7 @@ Intended for personal/internal use (GitHub Pages ToS prohibits commercial SaaS).
 
 ## Status
 
-**Milestone 4 in progress (2026-09-03):** checkpoints A + B + C + D done —
+**Milestone 4 in progress (2026-09-04):** checkpoints A + B + C + D + E done —
 **Watch folder…**: a live directory monitor (File System Access API,
 Chromium-only, feature-detected) that ingests and tail-follows new log files
 as they appear in the picked folder; removed files keep their rows. **Rules &
@@ -23,8 +23,12 @@ row into the merged view. **Workspace archive**: Save/Load workspace… bundles
 saved filters, rules, pinned notes, the active filter, the naive-timestamp
 mode and per-file metadata into one JSON file that re-applies in the same or
 another profile/machine (rules replaced, pins + saved filters merged — files
-themselves are re-opened). Remaining M4: local
-`.sqlite` open, webhook notifications (see `MILESTONE-4.md`).
+themselves are re-opened). **SQLite tab**: open a local `.sqlite`/`.db` file
+(sql.js, lazily loaded on first open) and browse its tables — user tables only
+(internal `sqlite_*` excluded), capped at 50k rows with truncation flagged,
+BLOBs shown as byte markers; `.sqlite`/`.db` files dropped via the normal open
+paths route here instead of the log parser. Remaining M4: webhook
+notifications (see `MILESTONE-4.md`).
 
 **Milestone 3 complete (2026-09-03):** on top of M2 — a Report tab with real
 SQL over the parsed entries (DuckDB-WASM in a worker, lazily loaded on first
@@ -44,7 +48,7 @@ CSV/JSON export of the filtered rows.
 - `MILESTONE-1.md` — M1 tasks + acceptance criteria (done)
 - `MILESTONE-2.md` — M2 tasks + acceptance criteria (done)
 - `MILESTONE-3.md` — M3 tasks + acceptance criteria (done)
-- `MILESTONE-4.md` — M4 power features: tasks, checkpoints A–C as-built, limitations
+- `MILESTONE-4.md` — M4 power features: tasks, checkpoints A–E as-built, limitations
 - `tests/perf.md` — measured performance numbers (M1, M2 re-check, M3 closeout)
 
 ## Usage
@@ -70,7 +74,11 @@ parsed entries — presets + free-form editor, DuckDB-WASM loaded on first use)
 and **Tail live…** (live tail-following of a growing file; Chromium only,
 other browsers get a hint instead) and **Watch folder…** (a directory monitor
 that ingests + tails new log files as they appear in the picked folder;
-Chromium only). All parsing happens locally in your
+Chromium only) and a **SQLite** tab (open a local `.sqlite`/`.db` file and
+browse its tables — sql.js is lazily loaded on first open, rows are capped at
+50k with truncation flagged, BLOBs show as byte markers; `.sqlite`/`.db` files
+dropped through the normal open paths route here instead of being parsed as
+logs). All parsing happens locally in your
 browser — files are never uploaded.
 
 ```
@@ -116,5 +124,10 @@ Details, verdict on the M2 drift, and how to reproduce: `tests/perf.md`.
   class as `tail -f`); the folder monitor watches top-level files only and a
   same-name delete+recreate is not detected as new content (see
   `MILESTONE-4.md`).
-- The SQL report engine lazy-loads ~39 MB of WASM on first Run (kept out of the
-  main bundle; subsequent runs use it from disk cache).
+- The SQL report engine lazy-loads ~39 MB of WASM on first Run and the SQLite
+  browser lazy-loads sql.js (~40 kB glue + ~660 kB wasm) on first open — both
+  kept out of the main bundle; subsequent opens use them from disk cache.
+- The open SQLite database is session-scoped: it does not survive a reload
+  (re-open the file) and it is not bundled into the workspace archive;
+  browsing is read-only, tables only (no views), and multiple `.sqlite`/`.db`
+  files dropped at once resolve last-wins (see `MILESTONE-4.md`).

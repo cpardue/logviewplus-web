@@ -32,7 +32,7 @@ rules & row coloring, workspace archive save/share, and webhook notifications
    integration) — DONE 2026-09-03 (as-built notes below).
 3. Checkpoint C — highlights/bookmarks/notes — DONE 2026-09-03 (as-built notes below).
 4. Checkpoint D — workspace archive save/share — DONE 2026-09-03 (as-built notes below).
-5. Checkpoint E — local `.sqlite` open (sql.js).
+5. Checkpoint E — local `.sqlite` open (sql.js) — DONE 2026-09-04 (as-built notes below).
 6. Checkpoint F — webhook notifications + closeout (README refresh,
    NEXT-STEPS §0, history entries).
 
@@ -42,7 +42,7 @@ rules & row coloring, workspace archive save/share, and webhook notifications
 - [x] B — rules & row coloring (2026-09-03)
 - [x] C — highlights/bookmarks/notes (2026-09-03)
 - [x] D — workspace archive save/share (2026-09-03)
-- [ ] E — local `.sqlite` open (sql.js)
+- [x] E — local `.sqlite` open (sql.js) (2026-09-04)
 - [ ] F — webhook notifications + closeout
 
 ## Acceptance criteria (Definition of Done — per checkpoint)
@@ -71,6 +71,14 @@ rules & row coloring, workspace archive save/share, and webhook notifications
   merged (archive wins on collisions), active filter + tz mode applied;
   invalid input is rejected with an error and leaves state untouched. — MET
   2026-09-03.
+- Checkpoint E: **Open SQLite…** (or a `.sqlite`/`.db` arriving via the normal
+  open/drop paths) opens the file in sql.js and lists its user tables (internal
+  `sqlite_*` rows excluded); picking a table shows its columns and rows in a
+  virtualized grid under the shared 50k row cap with a truncation flag, total
+  count + timing in the status line; BLOBs render as byte markers and NULLs
+  stay empty; a non-SQLite file surfaces an error without killing the engine
+  and a valid file afterwards recovers; `.sqlite`/`.db` files never reach the
+  log parser. — MET 2026-09-04.
 - Remaining criteria to be defined per checkpoint as work starts.
 
 ## As-built notes
@@ -253,7 +261,57 @@ rules & row coloring, workspace archive save/share, and webhook notifications
   both perf gates — 10 MB 475 ms / 100 MB 4066 ms — no regression
   (M4-C baseline 501 ms / 4184 ms).
 
-## Known limitations (M4-A/B/C/D; deferred to later checkpoints / M5)
+### Checkpoint E (local `.sqlite` open)
+
+- **Lazy engine, mirrors the DuckDB report chunk:** `src/lib/sqlite/engine.ts`
+  is only reachable via a dynamic import from the sqlite store — sql.js's glue
+  (~40 kB) + wasm (~660 kB, ~326 kB gzip) ship as separate assets fetched on
+  first open, so nothing joins the main bundle. `getSqliteEngine()` singleton;
+  a failed first init clears the cached promise so later opens retry.
+  `open(bytes)` closes the previous DB; `readTable` runs COUNT(*) first and
+  then `SELECT * … LIMIT min(total, cap)` via a prepared statement
+  (`getColumnNames()` for column names — it exists at runtime in sql.js 1.14.2
+  but is missing from @types/sql.js), so a multi-million-row table never
+  materializes beyond the shared 50k cap.
+- **DOM-free core** (`src/lib/sqlite/result.ts`, unit-tested): `normalizeCell`
+  (primitives pass through; BLOB → `<binary N bytes>` marker instead of raw
+  bytes in the DOM; bigints stringified so int64 stays exact beyond double
+  precision; non-finite numbers stringified), `mapTableResult` (row-major
+  cells + cap + truncation computed against the engine's COUNT, with a cap
+  override for tests), `sanitizeTableNames` (drops internal `sqlite_%` rows —
+  AUTOINCREMENT's `sqlite_sequence` included — unquotes quoted names,
+  case-insensitive dedupe + sort per SQLite's default collation) and
+  `quoteIdent` (double-quoted identifier, embedded quotes doubled).
+- **Store** (`src/store/sqliteStore.ts`): `openFile`/`selectTable` with the
+  report store's monotonic run-id guard; failures never reject — they land in
+  an `error` status the bar renders. Re-opening a file re-selects the
+  previously active table when it still exists (a live `activeTable` switch
+  happens while loading, so E2E polls on status + table together). `openSeq`
+  bumps on every completed open (success OR error).
+- **UI** (`src/components/SqliteBar.tsx`, third view behind a header "SQLite"
+  tab): "Open SQLite…" + hidden input (`.sqlite,.db`), one chip per table,
+  status line (rows in N ms / truncation / file name), rows rendered by the
+  existing `ReportGrid` (AG Grid virtualization). Exposes `window.__sqlite`
+  for E2E like `__report` does.
+- **Routing:** `.sqlite`/`.db` files arriving through ANY log-side path
+  (Open files…, drag & drop) are split out in `logStore.addFiles` before zip
+  expansion and opened via the sqlite store — they never touch the text
+  parser. App auto-switches to the SQLite view when `openSeq` bumps so a
+  routed open is visible. Multiple files at once: last one wins (documented).
+- **Fixture + E2E:** `scripts/gen-sqlite-fixture.mjs` (`npm run gen:sqlite`)
+  writes a byte-deterministic `tests/fixtures/sqlite/sample.sqlite` (users: 5
+  rows w/ AUTOINCREMENT; orders: 8 rows w/ NULL notes + 1/4/6-byte BLOBs; an
+  index) and re-opens it to assert its own shape before writing.
+  `tests/e2e/sqlite.spec.ts` (3 specs): browse both tables with exact
+  columns/rows, NULL → null cell and BLOB → byte markers, status line text; a
+  text log offered as "database" → error + engine recovers on the next valid
+  open; a `.db` through the main `file-input` routes to the SQLite tab (0
+  parsed rows, no file tab). Unit: 13 tests in `tests/unit/sqlite.test.ts`.
+- **Gates:** lint clean; unit 184/184 (24 files, +13); build ok; e2e 37 passed
+  incl. both perf gates — 10 MB 483 ms / 100 MB 4011 ms — no regression
+  (M4-D baseline 475 ms / 4066 ms).
+
+## Known limitations (M4-A/B/C/D/E; deferred to later checkpoints / M5)
 
 - Top-level files only — no recursive subdirectory watch (per-subdir sessions
   would be the natural extension).
@@ -272,3 +330,14 @@ rules & row coloring, workspace archive save/share, and webhook notifications
   A pin outlives its source file (the note entry stays until deleted; the jump
   button becomes a no-op). One accent color for all pins — no per-pin colors,
   and notes attach to whole rows, not text spans.
+- SQLite browser state is session-scoped: the open database does not survive a
+  reload (the file must be opened again) and it is not part of the workspace
+  archive (same class as the FSA-handle item above). Browsing is read-only —
+  no writes or free-form SQL against the opened file (the Report tab's SQL runs
+  over parsed log entries, a different engine). Tables only — SQLite views are
+  not listed. Multiple `.sqlite`/`.db` files dropped at once: the last one wins.
+  sql.js runs single-threaded on the main thread, so opening very large
+  databases or reading huge tables can briefly block the UI (the 50k-row cap
+  bounds the read side); int64 values beyond 2^53 lose precision inside sql.js
+  itself (documented upstream limitation — bigints are stringified exactly when
+  they do arrive).

@@ -5,6 +5,7 @@ import { startParse, startTail, startDirMonitor as watchDir, type ParseSession }
 import { FsaDir } from '../lib/dirWatch'
 import { HandleSource, type TailSource } from '../lib/tail'
 import { ingestZip } from '../lib/ingest'
+import { useSqliteStore } from './sqliteStore'
 import { loadRules, saveRules } from '../lib/rules-db'
 import type { Rule } from '../lib/rules'
 import { loadHighlights, saveHighlight, deleteHighlight, replaceHighlights } from '../lib/highlights-db'
@@ -96,6 +97,9 @@ let nextId = 1
 let dirSession: ParseSession | null = null
 /** id → file name for tabs opened by the directory monitor. */
 const dirFiles = new Map<string, string>()
+
+/** Binary databases route to the SQLite tab, not the text parser. */
+const SQLITE_EXT = /\.(sqlite|db)$/i
 
 const TZ_KEY = 'lvp.tzMode'
 
@@ -286,7 +290,16 @@ export const useLogStore = create<LogState>((set, get) => ({
 
   addFiles(list) {
     void (async () => {
-      const { files, failures } = await expand(Array.from(list))
+      const all = Array.from(list)
+      // .sqlite/.db files are binary databases, not logs — open them in the
+      // SQLite tab instead of feeding them to the parser (last one wins when
+      // several arrive at once). openFile never rejects; failures land in its
+      // error status where the user can see them.
+      const sqliteFiles = all.filter(f => SQLITE_EXT.test(f.name))
+      for (const f of sqliteFiles) await useSqliteStore.getState().openFile(f)
+      const rest = all.filter(f => !SQLITE_EXT.test(f.name))
+      if (rest.length === 0) return
+      const { files, failures } = await expand(rest)
       for (const fail of failures) {
         const id = `f${nextId++}`
         set(s => ({

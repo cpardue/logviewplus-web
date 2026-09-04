@@ -11,6 +11,8 @@ import NotesBar from './components/NotesBar'
 import ExportBar from './components/ExportBar'
 import LogGrid from './components/LogGrid'
 import ReportBar from './components/ReportBar'
+import SqliteBar from './components/SqliteBar'
+import { useSqliteStore } from './store/sqliteStore'
 
 const EMPTY_ROWS: never[] = []
 // Evaluated once per page load — the File System Access API is either there (Chromium) or not.
@@ -36,9 +38,18 @@ export default function App() {
   const setActive = useLogStore(s => s.setActive)
   const setMerged = useLogStore(s => s.setMerged)
   const [dragOver, setDragOver] = useState(false)
-  const [view, setView] = useState<'logs' | 'report'>('logs')
+  const [view, setView] = useState<'logs' | 'report' | 'sqlite'>('logs')
   const inputRef = useRef<HTMLInputElement>(null)
   const workspaceInputRef = useRef<HTMLInputElement>(null)
+
+  // A .sqlite/.db file routed in from the log side (drop / Open files…) opens
+  // in the SQLite view — switch there so the open is visible.
+  const sqliteOpenSeq = useSqliteStore(s => s.openSeq)
+  const prevOpenSeq = useRef(0)
+  useEffect(() => {
+    if (sqliteOpenSeq > prevOpenSeq.current) setView('sqlite')
+    prevOpenSeq.current = sqliteOpenSeq
+  }, [sqliteOpenSeq])
 
   const fileIds = Object.keys(files)
   const active = activeId ? files[activeId] : null
@@ -158,6 +169,13 @@ export default function App() {
           >
             Report
           </button>
+          <button
+            data-testid="tab-sqlite"
+            className={view === 'sqlite' ? 'tab active' : 'tab'}
+            onClick={() => setView(v => (v === 'sqlite' ? 'logs' : 'sqlite'))}
+          >
+            SQLite
+          </button>
         </div>
         <button className="btn" onClick={() => inputRef.current?.click()}>
           Open files…
@@ -224,6 +242,8 @@ export default function App() {
       </header>
       {view === 'report' ? (
         <ReportBar entries={scopeEntries} scopeLabel={merged ? 'all files (merged)' : (active?.name ?? 'log')} />
+      ) : view === 'sqlite' ? (
+        <SqliteBar />
       ) : (
         <>
           {merged ? (
