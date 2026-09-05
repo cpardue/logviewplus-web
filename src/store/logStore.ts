@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { LogEntry, LogLevel } from '../parsers/types'
 import { EMPTY_FILTERS, type Filters } from '../lib/filters'
 import { startParse, startTail, startDirMonitor as watchDir, type ParseSession } from '../lib/pipeline'
+import { ENCODING_CHOICES, type EncodingChoice } from '../lib/encoding'
 import { FsaDir } from '../lib/dirWatch'
 import { HandleSource, type TailSource } from '../lib/tail'
 import { ingestZip } from '../lib/ingest'
@@ -43,6 +44,8 @@ export interface FileState {
   lines: number
   startedAt: number
   finishedAt: number | null
+  /** Resolved encoding label used to decode this file (auto-detected or override). */
+  encoding?: string
   /**
    * Parsed rows. The array reference stays stable while a file parses —
    * batches are appended in place (see {@link appendRows}); tail rotation
@@ -60,6 +63,8 @@ interface LogState {
   filters: Filters
   /** How zone-less timestamps are interpreted while parsing (persisted). */
   tzMode: 'local' | 'utc'
+  /** File-encoding preference for newly opened files (persisted). */
+  encoding: EncodingChoice
   /** "All" merged view across every ready file. */
   merged: boolean
   /** Name of the watched folder (Chromium only); null when not watching. */
@@ -89,6 +94,8 @@ interface LogState {
   clearFilters(): void
   setFilters(f: Filters): void
   setTzMode(mode: 'local' | 'utc'): void
+  /** File-encoding preference for files opened afterwards (persisted). */
+  setEncoding(choice: EncodingChoice): void
   /** Replace the rule list (persists to IndexedDB). */
   setRules(rules: Rule[]): void
   /** Pin a row with an empty note (no-op when already pinned); persists. */
@@ -122,12 +129,22 @@ const dirFiles = new Map<string, string>()
 const SQLITE_EXT = /\.(sqlite|db)$/i
 
 const TZ_KEY = 'lvp.tzMode'
+const ENC_KEY = 'lvp.encoding'
 
 function readTzMode(): 'local' | 'utc' {
   try {
     return typeof localStorage !== 'undefined' && localStorage.getItem(TZ_KEY) === 'utc' ? 'utc' : 'local'
   } catch {
     return 'local'
+  }
+}
+
+function readEncoding(): EncodingChoice {
+  try {
+    const v = typeof localStorage !== 'undefined' ? localStorage.getItem(ENC_KEY) : null
+    return v && ENCODING_CHOICES.some(c => c.value === v) ? (v as EncodingChoice) : 'auto'
+  } catch {
+    return 'auto'
   }
 }
 
@@ -297,6 +314,13 @@ async function beginTail(get: StoreGet, set: StoreSet, source: TailSource, activ
     startTail(
       source,
       {
+        onEncoding(enc) {
+          set(s => {
+            const f = s.files[id]
+            if (!f) return s
+            return { files: { ...s.files, [id]: { ...f, encoding: enc.label } } }
+          })
+        },
         onRows(rows) {
           appendRows(id, rows, set, get)
         },
@@ -345,7 +369,7 @@ async function beginTail(get: StoreGet, set: StoreSet, source: TailSource, activ
           })
         },
       },
-      { tzMode: get().tzMode },
+      { tzMode: get().tzMode, encoding: get().encoding },
     ),
   )
   return id
@@ -382,6 +406,7 @@ export const useLogStore = create<LogState>((set, get) => ({
   activeId: null,
   filters: EMPTY_FILTERS,
   tzMode: readTzMode(),
+  encoding: readEncoding(),
   merged: false,
   dirName: null,
   rules: [],
@@ -451,6 +476,13 @@ export const useLogStore = create<LogState>((set, get) => ({
           startParse(
             file,
             {
+              onEncoding(enc) {
+                set(s => {
+                  const f = s.files[id]
+                  if (!f) return s
+                  return { files: { ...s.files, [id]: { ...f, encoding: enc.label } } }
+                })
+              },
               onRows(rows) {
                 appendRows(id, rows, set, get)
               },
@@ -493,7 +525,7 @@ export const useLogStore = create<LogState>((set, get) => ({
                 sessions.delete(id)
               },
             },
-            { tzMode: get().tzMode },
+            { tzMode: get().tzMode, encoding: get().encoding },
           ),
         )
       }
@@ -593,6 +625,15 @@ export const useLogStore = create<LogState>((set, get) => ({
     set({ tzMode: mode })
     try {
       localStorage.setItem(TZ_KEY, mode)
+    } catch {
+      // persistence is best-effort
+    }
+  },
+
+  setEncoding(choice) {
+    set({ encoding: choice })
+    try {
+      localStorage.setItem(ENC_KEY, choice)
     } catch {
       // persistence is best-effort
     }

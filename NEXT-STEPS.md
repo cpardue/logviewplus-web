@@ -1,20 +1,18 @@
 # NEXT-STEPS — logviewplus-web
 
 > **Read this first in every new session.** Companion docs: `PLAN.md`,
-> `MILESTONE-1.md`, `README.md`, `tests/perf.md`, and the history file at
-> `../history/logviewplus-web.md` (one level up, outside the repo).
-> Last updated: 2026-09-04 — **M4 COMPLETE**: checkpoints A–F DONE (directory
-> monitor; rules & row coloring — persisted user rules → grid row colors,
-> first match wins; highlights/bookmarks/notes — right-click pin + note,
-> persisted → accent bar + NotesBar, exact file:line identity; workspace
-> archive save/share — one JSON file bundles saved filters + rules + pins +
-> active filter + tz mode + per-file metadata, re-openable in any profile/
-> machine; local `.sqlite` open — sql.js table browser behind a SQLite tab,
-> `.sqlite`/`.db` routed away from the parser; webhook notifications — LIVE-
-> appended entries matching text/level/file POSTed as JSON batches to a user
-> URL (1 s coalescing, ≤ 50 per POST, serialized sends, test button, config
-> persisted), replacing the original's command-line provider) — see
-> `MILESTONE-4.md`. Next: M5 polish (§0).
+> `MILESTONE-1.md`, `README.md`, `tests/perf.md`, `MILESTONE-5.md`, and the
+> history file at `../history/logviewplus-web.md` (one level up, outside the
+> repo).
+> Last updated: 2026-09-04 — **M4 COMPLETE** (checkpoints A–F: directory
+> monitor; rules & row coloring; highlights/bookmarks/notes; workspace
+> archive save/share; local `.sqlite` open; webhook notifications — see
+> `MILESTONE-4.md`) + **M5 CHECKPOINT A COMPLETE**: file encodings — BOM
+> detect + strip (UTF-8/UTF-16 LE/BE), 64 KiB sample auto-detect (ASCII →
+> UTF-8; strict-UTF-8 → UTF-8; UTF-16 zero-parity → LE/BE; else
+> Windows-1252), persisted Encoding select override (applies to files opened
+> afterwards) + per-file resolved-encoding toolbar badge; tail/monitor honor
+> the same rules — see `MILESTONE-5.md`. Next: M5-B perf pass (§0).
 
 ## 0. Where we are (TL;DR)
 
@@ -196,8 +194,36 @@
   status line with parsing unaffected). Gates: lint / 204 unit (25 files) /
   build / 41 e2e incl. both perf gates — 10 MB 577 ms, 100 MB 3924 ms — no
   regression (M4-E 483/4011). Full notes + limitations in `MILESTONE-4.md`.
-- Next up: **M5 polish** — encodings/culture, 1 GB+ perf pass (main-thread
-  decode move + columnar storage per `tests/perf.md`), a11y, docs.
+- **M5 checkpoint A COMPLETE — 2026-09-04**: file encodings.
+  `src/lib/encoding.ts` = DOM-free core: `detectBom`, `isStrictUtf8` (pure
+  byte scan: shapes/truncation/overlong/U+10FFFF), `detectEncoding` (BOM →
+  UTF-16 zero-parity → no-high-bytes → strict-UTF-8 → windows-1252; the
+  parity check must precede the ASCII shortcut — BOM-less UTF-16 of ASCII has
+  no high bytes) and `resolveFromSample`/`resolveFromBlob` (explicit choice
+  wins the label; BOM skipped only when it matches that label; 64 KiB sample).
+  `readTextChunks(blob, chunkSize, resolution)` starts at `bomLength`,
+  streaming TextDecoder under the resolved label (UTF-16 units split across
+  slices survive); `TailFeed` takes the same resolution (reset keeps the
+  label); `startParse`/`startTail` resolve from one leading read BEFORE any
+  chunk flows and report via optional `onEncoding`. Store: persisted
+  `encoding` setting (`lvp.encoding`, mirrors `tzMode`) feeds every open path;
+  `FileState.encoding` → toolbar badge. FilterBar Encoding select (Auto +
+  four explicit). Culture (locale date grammars): evaluated, OUT of scope —
+  fixed timestamp formats + deterministic display. New
+  `tests/unit/encoding.test.ts` (31 tests) + `tests/e2e/encoding.spec.ts`
+  (5 specs: auto-1252 incl. real € byte 0x80, BOM'd UTF-16LE strip, UTF-8 no
+  regression, forced-UTF-8 override → U+FFFD, reload persistence) +
+  deterministic fixtures `win1252.log`/`utf16le.log`/`utf8-mb.log`
+  (`npm run gen:encodings`). Gates: lint / 235 unit (26 files) / build /
+  44 e2e; perf re-run after the change: 10 MB 460 ms, 100 MB 3868 ms — no
+  regression (M4-F 577/3924). Limitations in `MILESTONE-5.md` (64 KiB sample;
+  override affects files opened afterwards only; 1252 = the single ANSI
+  fallback).
+- Next up: **M5-B — 1 GB+ perf pass** (move decode + `split('\n')` out of the
+  main thread into the parse worker via transferred ArrayBuffers; evaluate
+  columnar/typed-array entry storage — the ~1 GB heap at 1.4M rows is the real
+  ceiling, not parse speed; re-measure in `tests/perf.md`). Then M5-C a11y,
+  M5-D docs section. See `MILESTONE-5.md` for the full checkpoint plan.
 
 ## 1. ~~Immediate task: enable Pages, verify live site~~ — DONE 2026-09-02
 
@@ -264,18 +290,19 @@ Steps actually taken (kept for reference):
 
 ```
 npm run lint
-npm test                      # 204 unit tests (25 files), ~1.5 s
+npm test                      # 235 unit tests (26 files), ~1.5 s
 npm run build                 # tsc -b && vite build → dist/
 npm run gen:logs -- 10        # deterministic fixtures (seeded; 10MB=139769 lines, 100MB=1397688)
 npm run gen:sqlite            # deterministic .sqlite fixture (committed at tests/fixtures/sqlite/)
+npm run gen:encodings         # deterministic encoding fixtures (win1252/utf16le/utf8-mb, committed)
 npm run build                 # REQUIRED before e2e (playwright webServer serves dist via vite preview)
-npm run test:e2e              # 39 tests: app/merge/zip/paste/saved-filters/export/report/tail/dir/rules/highlights/workspace/sqlite/webhook chains + (PERF-gated) perf
-$env:PERF='1'; $env:PERF_100='1'; npx playwright test   # 41 incl. both perf gates (~15 s on a quiet pass)
+npm run test:e2e              # 44 tests: app/merge/zip/paste/saved-filters/export/report/tail/dir/rules/highlights/workspace/sqlite/webhook/encoding chains + (PERF-gated) perf
+$env:PERF='1'; $env:PERF_100='1'; npx playwright test   # 46 incl. both perf gates (~15 s on a quiet pass)
 ```
 
 - Chromium is already installed (`npx playwright install chromium` if a fresh
   Playwright version demands re-download).
-- Expected: unit 204/204; E2E counts 40 → (WARN) 7 → (+“config”) 1; dir spec
+- Expected: unit 235/235; E2E counts 40 → (WARN) 7 → (+“config”) 1; dir spec
   All-view total 15 (10+5 entries); perf 10 MB < 5 s gate, 100 MB completes +
   scroll check (~4.5 s measured on this machine, 2026-09-03).
 - Quick API checks without a probe file: use MCP `github__get_repo` for repo
@@ -354,7 +381,14 @@ builders, never-throwing `postWebhook` w/ timeout) + `src/lib/webhook-db.ts` (ne
 IndexedDB `webhooks` store; shared handle v3 → v4), the webhook feed in `logStore`
 (pending buffer / 1 s flush / ≤ 50 per POST / serialized chain inside `appendRows`,
 `setWebhook`/`testWebhook`), `src/components/WebhookBar.tsx`, and
-`tests/{unit/webhook.test.ts, e2e/webhook.spec.ts}` (fetch stubbed via addInitScript)
+`tests/{unit/webhook.test.ts, e2e/webhook.spec.ts}` (fetch stubbed via addInitScript);
+M5-A added `src/lib/encoding.ts` (BOM/detection/resolution core) + encoding
+resolution in `pipeline.ts` (`onEncoding` callbacks, `ParseOptions.encoding`), the
+decoder label + BOM offset in `fileSource.ts`/`tail.ts`, the persisted `encoding`
+setting + `FileState.encoding` in `logStore.ts`, the FilterBar Encoding select +
+Toolbar badge, `scripts/gen-encoding-fixtures.mjs` and
+`tests/{unit/encoding.test.ts, e2e/encoding.spec.ts}` + fixtures
+`tests/fixtures/logs/{win1252,utf16le,utf8-mb}.log`
 
 ```
 src/parsers/        pure parser core: types.ts, levels.ts, timestamps.ts,
@@ -364,9 +398,12 @@ src/workers/        parser-engine.ts (pure streaming engine — unit-tested dire
                     partial-line state across feed(); flush semantics: remainder
                     emitted at end of a feed that had no limit-flush, or on finish)
                     parser.worker.ts (thin self.onmessage shell)
-src/lib/            fileSource.ts (1 MiB slice + streaming TextDecoder),
+src/lib/            fileSource.ts (1 MiB slice + streaming TextDecoder under the
+                    resolved encoding label, BOM offset), encoding.ts (BOM detect,
+                    strict-UTF-8 scan, auto-detect, resolution),
                     pipeline.ts (worker orchestration + template autodetect from
-                    first 200 sample lines), filters.ts (applyFilters/entryMatches),
+                    first 200 sample lines + encoding resolution before first chunk),
+                    filters.ts (applyFilters/entryMatches),
                     format.ts (bytes/duration/count)
 src/store/logStore.ts  zustand: files map (FileState incl. status/fraction/entries),
                     activeId, filters; sessions Map<id, ParseSession>

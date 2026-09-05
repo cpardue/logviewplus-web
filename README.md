@@ -10,6 +10,19 @@ Intended for personal/internal use (GitHub Pages ToS prohibits commercial SaaS).
 
 ## Status
 
+**Milestone 5 in progress — checkpoint A complete (2026-09-04):** file
+encodings. Every opened file's encoding is resolved before parsing: BOMs are
+detected and stripped (UTF-8 / UTF-16 LE / UTF-16 BE), then a leading 64 KiB
+sample auto-detects (pure ASCII → UTF-8; strict-UTF-8 validation → UTF-8;
+UTF-16 zero-parity pattern → UTF-16 LE/BE; anything else with high bytes →
+Windows-1252 — the legacy ANSI case, e.g. `café`/`€` service logs). The
+resolved encoding shows as a badge in the toolbar per file, and the FilterBar
+gained an **Encoding** select (Auto / UTF-8 / UTF-16 LE / UTF-16 BE /
+Windows-1252, persisted) that overrides detection for files opened after the
+change; live tail and folder-monitor sessions honor the same rules. Remaining
+M5 checkpoints: 1 GB+ performance pass, accessibility, docs section — see
+`MILESTONE-5.md`.
+
 **Milestone 4 complete (2026-09-04):** all six checkpoints done — **Watch
 folder…**: a live directory monitor (File System Access API, Chromium-only,
 feature-detected) that ingests and tail-follows new log files as they appear
@@ -54,6 +67,7 @@ CSV/JSON export of the filtered rows.
 - `MILESTONE-2.md` — M2 tasks + acceptance criteria (done)
 - `MILESTONE-3.md` — M3 tasks + acceptance criteria (done)
 - `MILESTONE-4.md` — M4 power features: tasks, checkpoints A–F as-built, limitations
+- `MILESTONE-5.md` — M5 polish: encodings (A, done), perf pass (B), a11y (C), docs (D)
 - `tests/perf.md` — measured performance numbers (M1, M2 re-check, M3 closeout)
 
 ## Usage
@@ -73,7 +87,10 @@ level chips that apply to the parsed data without re-parsing; saved filter
 sets persisted in IndexedDB; CSV/JSON export of the filtered rows; a **workspace archive** (Save/Load
 workspace… — one JSON file carrying saved filters, rules, pinned notes, the
 active filter, tz mode and per-file metadata, re-openable in any
-profile/machine); and a
+profile/machine); an **Encoding** select (Auto / UTF-8 / UTF-16 LE /
+UTF-16 BE / Windows-1252 — persisted, applies to files opened after the
+change; Auto detects BOM + content sample and the resolved encoding shows as
+a per-file badge in the toolbar); and a
 "Naive times: Local/UTC" setting for zone-less timestamps. On top of that: a **Report** tab (SQL over the
 parsed entries — presets + free-form editor, DuckDB-WASM loaded on first use)
 and **Tail live…** (live tail-following of a growing file; Chromium only,
@@ -119,6 +136,11 @@ Details, verdict on the M2 drift, and how to reproduce: `tests/perf.md`.
 
 ## Known limitations
 
+- Encoding auto-detection samples the first 64 KiB: a file whose leading 64
+  KiB is valid UTF-8 but whose tail carries Windows-1252 bytes will be read as
+  UTF-8 (replacement characters) — pick an explicit encoding for such files.
+  The Encoding select affects files opened AFTER the change (reopen an already
+  opened file to re-decode it), like the "Naive times" setting.
 - Naive timestamps (no timezone) follow the "Naive times" setting (default
   Local); changing it only affects files opened afterwards — already-opened
   files must be reopened.

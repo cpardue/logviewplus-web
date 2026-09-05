@@ -1,10 +1,13 @@
 import { DEFAULT_CHUNK, readTextChunks } from './fileSource'
+import { resolveFromBlob, resolveFromSample, SAMPLE_BYTES, type EncodingChoice, type EncodingResolution } from './encoding'
 import { detectFormat } from '../parsers/detect'
 import { DirFeed, type DirEntry, type DirSource } from './dirWatch'
 import { TailFeed, type TailSource } from './tail'
 import type { LogEntry, ParserSpec } from '../parsers/types'
 
 export interface ParseCallbacks {
+  /** The file's encoding was resolved (BOM + sample or user override). */
+  onEncoding?(enc: EncodingResolution): void
   onRows(rows: LogEntry[]): void
   onProgress(lines: number, entries: number, bytes: number): void
   onDone(lines: number, entries: number): void
@@ -18,6 +21,8 @@ export interface ParseSession {
 export interface ParseOptions {
   /** How zone-less timestamps are interpreted while parsing this file. */
   tzMode?: 'local' | 'utc'
+  /** File encoding: 'auto' (default) detects BOM + content sample. */
+  encoding?: EncodingChoice
 }
 
 /**
@@ -57,7 +62,10 @@ export function startParse(file: File, callbacks: ParseCallbacks, opts: ParseOpt
   }
 
   void (async () => {
-    for await (const { text } of readTextChunks(file)) {
+    const resolution = await resolveFromBlob(file, opts.encoding ?? 'auto')
+    if (closed) return
+    callbacks.onEncoding?.(resolution)
+    for await (const { text } of readTextChunks(file, DEFAULT_CHUNK, resolution)) {
       if (closed) return
       if (!inited) {
         const spec: ParserSpec = detectFormat(text.split('\n').slice(0, 200))
@@ -81,6 +89,8 @@ export function startParse(file: File, callbacks: ParseCallbacks, opts: ParseOpt
 
 
 export interface TailCallbacks {
+  /** The file's encoding was resolved (BOM + sample or user override). */
+  onEncoding?(enc: EncodingResolution): void
   onRows(rows: LogEntry[]): void
   onProgress(lines: number, entries: number, bytes: number): void
   /** Initial full-file read complete — the file is usable; tailing continues. */
@@ -104,8 +114,9 @@ export interface TailOptions extends ParseOptions {
  * Tail a live file: read the current content in 1 MiB chunks through one
  * persistent parse worker (spec autodetected from the first chunk, NO
  * `finish` — the engine stays open so line/seq counters keep running), then
- * poll for growth. Growth is decoded by one streaming UTF-8 decoder across
- * polls and fed as chunks. On rotation (file shrank) the worker engine is
+ * poll for growth. Growth is decoded by one streaming decoder for the file's
+ * resolved encoding (leading sample; user override wins) across polls and fed
+ * as chunks. On rotation (file shrank) the worker engine is
  * reset (epoch bump) and the file re-read from byte 0. Returns a
  * {@link ParseSession}; `close()` stops polling and terminates the worker.
  */
@@ -119,7 +130,9 @@ export function startTail(source: TailSource, callbacks: TailCallbacks, opts: Ta
   let busy = false
   let stopped = false
   let resetAck: (() => void) | null = null
-  const feed = new TailFeed(source)
+  /** Created once the leading sample resolves the file's encoding. */
+  let feed: TailFeed | null = null
+  let timer: number | null = null
   const pollMs = opts.pollMs ?? 1000
 
   worker.onmessage = (ev: MessageEvent) => {
@@ -147,12 +160,12 @@ export function startTail(source: TailSource, callbacks: TailCallbacks, opts: Ta
     callbacks.onError(e.message || 'Parser worker crashed')
   }
 
-  async function handleRotation(): Promise<void> {
+  async function handleRotation(f: TailFeed): Promise<void> {
     // Rewind the byte feed before asking the worker to reset; onRotation()
     // runs only after the ack, at which point every pre-reset rows/progress
     // message has already been delivered (FIFO) — clearing stored rows then
     // cannot lose or duplicate entries.
-    feed.reset()
+    f.reset()
     if (!inited) return
     await new Promise<void>(resolve => {
       resetAck = resolve
@@ -163,11 +176,12 @@ export function startTail(source: TailSource, callbacks: TailCallbacks, opts: Ta
 
   /** One pump: consume up to the current file size, then wait for the next poll. */
   async function pump(): Promise<void> {
-    if (closed || busy || stopped) return
+    const f = feed
+    if (!f || closed || busy || stopped) return
     busy = true
     try {
       for (;;) {
-        const step = await feed.next(DEFAULT_CHUNK)
+        const step = await f.next(DEFAULT_CHUNK)
         switch (step.kind) {
           case 'none':
             if (!initialDone) {
@@ -184,7 +198,7 @@ export function startTail(source: TailSource, callbacks: TailCallbacks, opts: Ta
             else callbacks.onStopped?.()
             return
           case 'rotate':
-            await handleRotation()
+            await handleRotation(f)
             // Loop again: re-read the (new) content from byte 0.
             break
           case 'text': {
@@ -206,14 +220,41 @@ export function startTail(source: TailSource, callbacks: TailCallbacks, opts: Ta
     }
   }
 
-  void pump()
-  const timer = setInterval(() => void pump(), pollMs)
+  // Resolve the encoding from a leading sample BEFORE the first pump so the
+  // whole session (initial read, every growth poll, post-rotation re-read)
+  // decodes with one label; the feed is created only once that is known.
+  void (async () => {
+    let sampleSize: number
+    try {
+      sampleSize = await source.stat()
+    } catch {
+      return // handle already dead — the first poll would report it anyway
+    }
+    if (closed) return
+    if (sampleSize < 0) {
+      stopped = true
+      callbacks.onError('Tailed file disappeared before it could be read')
+      return
+    }
+    const sample =
+      sampleSize === 0
+        ? new Uint8Array(0)
+        : new Uint8Array(await source.slice(0, Math.min(sampleSize, SAMPLE_BYTES)))
+    if (closed) return
+    const resolution = resolveFromSample(sample, opts.encoding ?? 'auto')
+    callbacks.onEncoding?.(resolution)
+    feed = new TailFeed(source, resolution)
+    void pump()
+    timer = window.setInterval(() => void pump(), pollMs)
+  })().catch(err => {
+    if (!closed && !stopped) callbacks.onError(String(err))
+  })
 
   return {
     close() {
       closed = true
       stopped = true
-      clearInterval(timer)
+      if (timer != null) window.clearInterval(timer)
       worker.terminate()
     },
   }

@@ -1,0 +1,10 @@
+2026-09-04 09:00:01 INFO: Service started by café operator
+2026-09-04 09:00:02 DEBUG: Loaded settings from C:\app\conf
+2026-09-04 09:00:05 WARN: Invoice for Müller AG is €1,250.00 - overdue
+2026-09-04 09:00:08 INFO: Backup of données completed
+2026-09-04 09:00:12 ERROR: Disk check failed on volume C:\désign
+2026-09-04 09:00:15 INFO: User naïve.bird@exempel.se logged in
+2026-09-04 09:00:20 DEBUG: 42 sessions active on node-3
+2026-09-04 09:00:25 WARN: Retry 2/5 for upstream api
+2026-09-04 09:00:30 INFO: Heartbeat ok (1.2 ms)
+2026-09-04 09:00:35 ERROR: Unhandled exception in worker 7

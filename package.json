@@ -11,6 +11,7 @@
     "test:e2e": "playwright test",
     "gen:logs": "node scripts/gen-large.ts",
     "gen:sqlite": "node scripts/gen-sqlite-fixture.mjs",
+    "gen:encodings": "node scripts/gen-encoding-fixtures.mjs",
     "git:push": "node scripts/git-push.mjs",
     "git:push:api": "node scripts/git-push-api.mjs",
     "preview": "vite preview --port 4173 --host 127.0.0.1"

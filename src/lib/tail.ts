@@ -3,8 +3,10 @@
  *
  * The core ({@link TailFeed}) is DOM-free and directly unit-testable: it
  * tracks a byte offset inside an opaque {@link TailSource}, decodes each
- * growth with ONE persistent streaming UTF-8 decoder (multi-byte characters
- * split across read boundaries survive), and classifies every poll as
+ * growth with ONE persistent streaming decoder for the file's resolved
+ * encoding (see `src/lib/encoding.ts`; default UTF-8 — multi-byte characters
+ * and UTF-16 units split across read boundaries survive), and classifies
+ * every poll as
  * growth, rotation (the file shrank since the last observed size — truncated
  * or rotated in place) or removal (the source no longer resolves). Size-based
  * polling has two inherent blind spots, same class as `tail -f`: same-size
@@ -16,6 +18,8 @@
  * {@link isTailSupported}) is Chromium-only; feature detection happens in the
  * UI so non-Chromium browsers degrade gracefully.
  */
+
+import type { EncodingResolution } from './encoding'
 
 export interface TailSource {
   /** Current size in bytes; negative when the file no longer exists. */
@@ -33,12 +37,21 @@ export type TailStep =
   | { kind: 'removed' } // source no longer resolves — stop tailing (existing rows stay)
 
 export class TailFeed {
-  private decoder = new TextDecoder('utf-8', { fatal: false })
-  private offset = 0
+  private readonly resolution: EncodingResolution
+  private decoder: TextDecoder
+  private offset: number
   /** Size observed by the most recent `next()`; null until the first poll. */
   private prevSize: number | null = null
 
-  constructor(private readonly source: TailSource) {}
+  constructor(
+    private readonly source: TailSource,
+    resolution: EncodingResolution = { label: 'utf-8', bomLength: 0 },
+  ) {
+    this.resolution = resolution
+    this.decoder = new TextDecoder(resolution.label, { fatal: false })
+    // Start past any BOM — it belongs to the file header, not the log text.
+    this.offset = resolution.bomLength
+  }
 
   /** Bytes consumed from the source so far. */
   get consumed(): number {
@@ -72,10 +85,10 @@ export class TailFeed {
     return { kind: 'text', text, offset: to }
   }
 
-  /** Drop decoder state and rewind to byte 0 (after a rotation reset). */
+  /** Drop decoder state and rewind to the file start (after a rotation reset). */
   reset(): void {
-    this.decoder = new TextDecoder('utf-8', { fatal: false })
-    this.offset = 0
+    this.decoder = new TextDecoder(this.resolution.label, { fatal: false })
+    this.offset = this.resolution.bomLength
     this.prevSize = null
   }
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useLogStore } from '../store/logStore'
 import { LEVELS } from '../parsers/types'
 import { deleteFilter, listSavedFilters, saveFilter, type SavedFilter } from '../lib/filters-db'
+import { ENCODING_CHOICES, type EncodingChoice } from '../lib/encoding'
 
 /**
  * Text filter (250 ms debounce) + level chips + saved filter sets (IndexedDB).
@@ -15,6 +16,8 @@ export default function FilterBar() {
   const setFilters = useLogStore(s => s.setFilters)
   const tzMode = useLogStore(s => s.tzMode)
   const setTzMode = useLogStore(s => s.setTzMode)
+  const encoding = useLogStore(s => s.encoding)
+  const setEncoding = useLogStore(s => s.setEncoding)
   const savedFiltersVersion = useLogStore(s => s.savedFiltersVersion)
   const [text, setTextLocal] = useState('')
   const [saved, setSaved] = useState<SavedFilter[]>([])
@@ -125,6 +128,20 @@ export default function FilterBar() {
         >
           <option value="local">Local</option>
           <option value="utc">UTC</option>
+        </select>
+      </label>
+      <label className="tz" title="File encoding used when opening files (applies to files opened after the change; Auto detects from BOM + content sample)">
+        Encoding
+        <select
+          data-testid="encoding-select"
+          value={encoding}
+          onChange={e => setEncoding(e.target.value as EncodingChoice)}
+        >
+          {ENCODING_CHOICES.map(c => (
+            <option key={c.value} value={c.value}>
+              {c.label}
+            </option>
+          ))}
         </select>
       </label>
       <button className="btn" disabled={!anyFilter} onClick={clearFilters}>

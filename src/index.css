@@ -110,6 +110,15 @@ body {
   color: #ff7b72;
 }
 
+.t-enc {
+  font-size: 11px;
+  color: #6b7280;
+  border: 1px solid #33383f;
+  border-radius: 3px;
+  padding: 0 5px;
+  white-space: nowrap;
+}
+
 .tail-hint {
   font-size: 12px;
   color: #6b7280;
