@@ -3,7 +3,7 @@
  * Usage: node scripts/gen-large.ts <MB> [outPath]
  * Seed is fixed → output for a given size is reproducible.
  */
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { closeSync, mkdirSync, openSync, writeSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 function mulberry32(seed: number): () => number {
@@ -61,7 +61,15 @@ const rnd = mulberry32(42)
 let ms = Date.UTC(2026, 8, 1, 8, 0, 0)
 let size = 0
 let i = 0
-const parts: string[] = []
+// Chunked writes: a single ~1 GB joined string would hit V8's max string
+// length (~512 MB). Flush once the buffer passes FLUSH_BYTES so memory stays
+// flat and any fixture size works. Output bytes are identical to the old
+// single writeFileSync (same line sequence, same seed).
+const FLUSH_BYTES = 4 * 1024 * 1024
+
+mkdirSync(dirname(target), { recursive: true })
+const fd = openSync(target, 'w')
+let buf = ''
 
 while (size < targetBytes) {
   const lvl = pickLevel(rnd())
@@ -73,12 +81,15 @@ while (size < targetBytes) {
     .replaceAll('{c}', String(Math.floor(rnd() * 3)))
   const d = new Date(ms)
   const line = `${d.toISOString().slice(0, 19).replace('T', ' ')} ${lvl}: ${msg}\n`
-  parts.push(line)
+  buf += line
+  if (buf.length >= FLUSH_BYTES) {
+    writeSync(fd, buf, 'utf8')
+    buf = ''
+  }
   size += Buffer.byteLength(line, 'utf8')
   ms += 7 + Math.floor(rnd() * 400)
   i++
 }
-
-mkdirSync(dirname(target), { recursive: true })
-writeFileSync(target, parts.join(''), 'utf8')
+writeSync(fd, buf, 'utf8')
+closeSync(fd)
 console.log(`wrote ${target}: ${(size / 1048576).toFixed(2)} MB, ${i} lines`)

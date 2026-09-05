@@ -7,6 +7,9 @@ const LARGE_FIXTURE = 'tests/fixtures/logs/generated/app-10MB.log'
 const LARGE_LINES = 139_769
 const LARGE_100_FIXTURE = 'tests/fixtures/logs/generated/app-100MB.log'
 const LARGE_100_LINES = 1_397_688
+// Line count of the deterministic 1 GB fixture produced by `npm run gen:logs -- 1000`.
+const LARGE_1GB_FIXTURE = 'tests/fixtures/logs/generated/app-1000MB.log'
+const LARGE_1GB_LINES = 13_976_799
 
 interface AppCounts {
   total: number
@@ -225,5 +228,63 @@ test('perf: 100 MB file completes without crashing and grid scrolls', async ({ p
     await page.waitForTimeout(100)
   }
   expect(await gridPaintedRows(page)).toBeGreaterThan(0)
+})
+
+/**
+ * 1 GB CEILING PROBE (M5-B) — KNOWN-FAILING on the current plain-object
+ * storage: the store drain stalls at ~98% after ~14 min (renderer memory
+ * exhaustion; full data in tests/perf.md "M5-B" section). It is a canary for
+ * the M6-candidate row-storage/display redesign, NOT a gate — run it only
+ * when re-measuring the ceiling (`PERF_1000=1`). The gate suites stay green:
+ * the spec is skipped unless the env var is set. Samples store progress +
+ * renderer heap every 20 s so each run's stall point is on the record.
+ */
+test('perf: 1 GB file — parse completes; grid model build reported', async ({ page }) => {
+  test.skip(process.env.PERF_1000 !== '1', 'set PERF_1000=1 to run the 1 GB probe (needs generated fixture)')
+  test.setTimeout(900_000) // drain of ~14M rows at multi-GB heap is GC-bound; allow up to 15 min
+  await page.goto('/')
+
+  // Progress/heap sampler: runs in-page, reports via console (captured by Playwright).
+  await page.evaluate(() => {
+    window.setInterval(() => {
+      const c = (window as unknown as { __appCounts?: { total: number } }).__appCounts
+      const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory
+      console.log(
+        `[probe] t=${Math.round(performance.now() / 1000)}s total=${c?.total ?? 0} heap=${mem ? Math.round(mem.usedJSHeapSize / 1048576) : -1} MiB`,
+      )
+    }, 20_000)
+  })
+
+  const t0 = Date.now()
+  await page.getByTestId('file-input').setInputFiles(LARGE_1GB_FIXTURE)
+  await expect.poll(() => counts(page), { timeout: 840_000 }).toEqual({
+    total: LARGE_1GB_LINES,
+    visible: LARGE_1GB_LINES,
+  })
+  const parseMs = Date.now() - t0
+
+  const heap = await page.evaluate(() => {
+    const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory
+    return mem ? Math.round(mem.usedJSHeapSize / 1048576) : -1
+  })
+  console.log(`[perf] 1 GB parse complete: ${parseMs} ms (${LARGE_1GB_LINES} rows), heap at store-ready ≈ ${heap} MiB`)
+
+  // Grid model build: report survival, do not gate on it.
+  const probeGridState = async () => {
+    try {
+      await expect
+        .poll(async () => (await gridPaintedRows(page)) > 0, { timeout: 150_000, continueOnFailure: true })
+        .toBe(true)
+      return 'model built + painting'
+    } catch {
+      try {
+        const alive = await page.evaluate(() => document.body != null)
+        return alive ? 'renderer alive, model not painting within 150 s' : 'renderer gone'
+      } catch {
+        return 'renderer died during/after model build (memory ceiling)'
+      }
+    }
+  }
+  console.log(`[perf] 1 GB grid after parse: ${await probeGridState()}`)
 })
 

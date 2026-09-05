@@ -123,3 +123,102 @@ e2e incl. tail rotation + report) re-run green after the change.
 - AG Grid's one-shot 1.4M-row model build happens after the metric endpoint;
   it is why "completes + scrolls" is the 100 MB criterion, not a paint-time gate.
 
+
+## M5-B (2026-09-05) — worker-side decode + 1 GB re-measure
+
+### What changed
+
+Decode + line splitting moved from the main thread into the parse worker:
+
+- `fileSource.ts`: `readTextChunks` → `readByteChunks` — raw 1 MiB `ArrayBuffer`
+  slices (start past a resolved BOM; one empty final chunk for empty/BOM-only
+  blobs so callers still signal EOF).
+- `parser.worker.ts`: now owns the decode — a persistent streaming
+  `StreamDecoder` (`src/lib/streamDecoder.ts`, DOM-free) created at `init`
+  from the encoding label and reset with the engine on rotation. Chunk messages
+  carry a **transferred** ArrayBuffer + `stream` flag (parse flushes on the
+  final chunk; tail always streams). No string structured-clone crosses the
+  boundary in either direction for file content.
+- `tail.ts`: `TailFeed` emits raw bytes (no decoder on main); `startTail`'s
+  pump transfers growth bytes. `startParse`/`startTail` still decode ONE
+  leading 1 MiB chunk on main — solely for parser autodetect (the same
+  first-200-lines window as before).
+- `scripts/gen-large.ts`: chunked file writes — a single ~1 GB `join()` hits
+  V8's max string length (~512 MB) and crashed; output verified byte-identical
+  (SHA-256 match regenerating the 10 MB fixture).
+- New `PERF_1000`-gated ceiling-probe spec in `tests/e2e/app.spec.ts`
+  (KNOWN-FAILING canary for the storage/display redesign — see below).
+
+### 10 / 100 MB gates (same fixtures, same metric, this machine)
+
+| Scenario | Baseline (pre-change, ~30% bg load) | After, quiet run 1 (full-suite pass) | After, quiet run 2 (standalone) | After, high-load runs (~65% CPU) |
+| --- | --- | --- | --- | --- |
+| 10 MB: parse + full grid ready (< 3 s target / 5 s gate) | **497 ms** | 513 ms | 480 ms | 922 / 881 ms |
+| 100 MB: completes + scrolls | **4269 ms** | 3982 ms | 3861 ms | 8200 / 8563 ms |
+
+Verdict: **no regression under comparable load** (the high-load runs match the
+M2/M3 environmental-noise pattern — same machine, IDE + background processes;
+the parse path only lost work after this change). Decode + per-chunk string
+structured-clone are off the main thread; wall time is still dominated by
+worker parsing and the one-shot grid model build.
+
+### 1 GB re-measure — the store drain hits the memory ceiling
+
+Fixture: `app-1000MB.log` = 1000.00 MB / **13,976,799 lines** (seed 42).
+Probe: `tests/e2e/app.spec.ts` "1 GB file — parse completes; grid model build
+reported" (`PERF_1000=1`), sampling store progress + renderer heap every 20 s.
+
+- Run 1 (poll to 420 s): `total = 13,685,000` (97.9%), `visible = 0` — the
+  file was still "parsing"; renderer ALIVE (no crash).
+- Run 2 (poll to 840 s): `total = 13,725,000` (98.2%) — late-run drain rate
+  ≈ **100 rows/s**. The grid phase was never reached.
+- Worker decode + parse is linear (10/100 MB unchanged above) — it is no
+  longer the bottleneck. The bottleneck is the MAIN-thread store drain into a
+  ~4.5–5 GB plain-object heap: 2,796 structured-clone row batches delivered
+  and appended while GC cycles over the multi-GB object/string heap stretch to
+  seconds and file pages + the IPC message queue push the renderer into swap.
+- Control measurement (Node, same 13.98M-row shape): the bare `push(5k)`
+  append loop completes in **3.6 s** total (rss 2.8 GB), with a ~5x tail
+  slowdown (array-growth re-allocation copies) — so the append mechanic alone
+  is not fatal; renderer memory exhaustion is the ceiling.
+- In-browser heap at 100 MB store-ready: **803 MiB** used JS heap = ≈437 MiB
+  entry store (Node probe) + ≈365 MiB AG Grid row model / app overhead
+  (~260 B/row display-side).
+
+### Columnar / typed-array row storage — evaluated
+
+Node probe at the exact 100 MB fixture scale (1,397,688 rows; Node full-icu,
+`--expose-gc`, heap delta between GC-settled states):
+
+| Layout | Total | Per row |
+| --- | --- | --- |
+| Text-only floor (message + raw bytes, zero structure) | 175.4 MiB | 132 B |
+| Plain `LogEntry` objects (current store shape) | **437.3 MiB** | **328 B** |
+| Simple columnar (`Float64Array` ts, `Uint32Array` lineNo, shared level refs, seq = index; message/raw still strings) | **330.7 MiB** | **248 B** |
+
+Verdict: a simple columnar store saves **24%** structurally (328 → 248 B/row).
+That does NOT lift the ceiling: at 1 GB scale the store alone is still
+≈3.3–4.4 GB, and unless the worker posts TRANSFERRED column buffers (instead
+of per-object structured clones), the drain stays object-by-object. The binding
+display constraint is separate and bigger: AG Grid Community's
+`ClientSideRowModel` builds an eager full row model — ~260 B/row of RowNode
+overhead, so 14M rows ≈ **3.5+ GB of display-side heap** regardless of how
+entries are stored. No entry-storage change makes AG Grid render a 1 GB log on
+this machine.
+
+### Conclusion / recommendation (M6 candidate — out of scope for checkpoint B)
+
+1. Columnar typed-array entry storage with worker→main **transferred** column
+   buffers (removes per-object IPC cloning, −24% structural heap, allows
+   pre-sized growth).
+2. A display strategy beyond ~1–2M rows: AG Grid Enterprise
+   `ServerSideRowModel`, or an explicit "first N rows displayed — use the
+   Report/SQLite tabs to explore" cap mode, or a lightweight virtualized
+   index-only list.
+3. Optional: DuckDB (already in the app) as the engine of record for >1 GB
+   files, with the grid rendering query results instead of raw rows.
+
+Empirical practical ceiling after M5-B: 100 MB ≈ 4 s comfortable; ~500 MB
+heavy but workable; **1 GB stalls and does not complete in 14 min** —
+documented as the known ceiling until item 1+2 land.
+

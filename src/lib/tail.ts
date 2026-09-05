@@ -2,17 +2,17 @@
  * Live tail-following for growing log files.
  *
  * The core ({@link TailFeed}) is DOM-free and directly unit-testable: it
- * tracks a byte offset inside an opaque {@link TailSource}, decodes each
- * growth with ONE persistent streaming decoder for the file's resolved
- * encoding (see `src/lib/encoding.ts`; default UTF-8 — multi-byte characters
- * and UTF-16 units split across read boundaries survive), and classifies
- * every poll as
- * growth, rotation (the file shrank since the last observed size — truncated
- * or rotated in place) or removal (the source no longer resolves). Size-based
- * polling has two inherent blind spots, same class as `tail -f`: same-size
- * rewrites are undetectable, and a file that grows then shrinks between two
- * polls (ending larger than the last observed size) slips through. Both are
- * accepted limitations.
+ * tracks a byte offset inside an opaque {@link TailSource} and classifies
+ * every poll as growth, rotation (the file shrank since the last observed
+ * size — truncated or rotated in place) or removal (the source no longer
+ * resolves). Growth is emitted as RAW BYTES — decoding happens in the parse
+ * worker (M5-B: one persistent streaming `StreamDecoder` per session, so
+ * multi-byte characters and UTF-16 units split across read boundaries
+ * survive); this feed only knows the resolved BOM length, to start past it.
+ * Size-based polling has two inherent blind spots, same class as `tail -f`:
+ * same-size rewrites are undetectable, and a file that grows then shrinks
+ * between two polls (ending larger than the last observed size) slips
+ * through. Both are accepted limitations.
  *
  * The File System Access API adapter ({@link HandleSource} /
  * {@link isTailSupported}) is Chromium-only; feature detection happens in the
@@ -32,13 +32,13 @@ export interface TailSource {
 
 export type TailStep =
   | { kind: 'none' } // no new bytes since the last read
-  | { kind: 'text'; text: string; offset: number } // decoded growth consumed up to offset
+  | { kind: 'bytes'; buf: ArrayBuffer; offset: number } // raw growth consumed up to offset (decode in the worker)
   | { kind: 'rotate' } // shrank since last observation — caller resets, then reads from byte 0
   | { kind: 'removed' } // source no longer resolves — stop tailing (existing rows stay)
 
 export class TailFeed {
-  private readonly resolution: EncodingResolution
-  private decoder: TextDecoder
+  /** Offset of the first readable byte (just past a resolved BOM). */
+  private readonly startOffset: number
   private offset: number
   /** Size observed by the most recent `next()`; null until the first poll. */
   private prevSize: number | null = null
@@ -47,10 +47,9 @@ export class TailFeed {
     private readonly source: TailSource,
     resolution: EncodingResolution = { label: 'utf-8', bomLength: 0 },
   ) {
-    this.resolution = resolution
-    this.decoder = new TextDecoder(resolution.label, { fatal: false })
     // Start past any BOM — it belongs to the file header, not the log text.
-    this.offset = resolution.bomLength
+    this.startOffset = resolution.bomLength
+    this.offset = this.startOffset
   }
 
   /** Bytes consumed from the source so far. */
@@ -61,7 +60,9 @@ export class TailFeed {
   /**
    * Poll once. Reads at most `maxBytes` of growth per call — the initial full
    * read chunks at 1 MiB (memory-flat, progress-friendly), steady-state polls
-   * use Infinity (catch up in one slice).
+   * use Infinity (catch up in one slice). Emits RAW bytes: incomplete LINES
+   * are the parse engine's job (it keeps a partial trailing line across
+   * feeds) and incomplete DECODE sequences are the worker decoder's job.
    */
   async next(maxBytes: number = Infinity): Promise<TailStep> {
     const size = await this.source.stat()
@@ -76,19 +77,14 @@ export class TailFeed {
     }
     const to = Math.min(size, this.offset + maxBytes)
     const buf = await this.source.slice(this.offset, to)
-    // Always `stream: true` — the file may keep growing; a pending incomplete
-    // sequence must stay buffered for the next read. Incomplete LINES are the
-    // parse engine's job (it keeps a partial trailing line across feeds).
-    const text = this.decoder.decode(new Uint8Array(buf), { stream: true })
     this.offset = to
     this.prevSize = size
-    return { kind: 'text', text, offset: to }
+    return { kind: 'bytes', buf, offset: to }
   }
 
-  /** Drop decoder state and rewind to the file start (after a rotation reset). */
+  /** Rewind to the file start after a BOM (after a rotation reset). */
   reset(): void {
-    this.decoder = new TextDecoder(this.resolution.label, { fatal: false })
-    this.offset = this.resolution.bomLength
+    this.offset = this.startOffset
     this.prevSize = null
   }
 }

@@ -47,7 +47,7 @@ screen readers, and documented end to end.
 ## Checkpoint status
 
 - [x] A — encodings (2026-09-04)
-- [ ] B — 1 GB+ performance pass
+- [x] B — 1 GB+ performance pass (2026-09-05, ceiling documented + recommendation)
 - [ ] C — accessibility
 - [ ] D — docs section + closeout
 
@@ -63,7 +63,25 @@ screen readers, and documented end to end.
   decoder for files opened afterwards; the resolved encoding is visible per
   file in the toolbar; tail/monitor sessions honor the same rules. — MET
   2026-09-04.
-- Checkpoint B: _written when started._
+- Checkpoint B: worker owns decode + line splitting — main thread only reads
+  `Blob` slices and **transfers** the ArrayBuffers (no string structured-clone);
+  one leading 1 MiB chunk is still decoded on main solely for parser autodetect
+  (same 200-line sample window as before). Same protocol serves parse, tail
+  initial read, growth polls and post-rotation re-reads; tail keeps its
+  always-streaming decode, parse flushes on the final chunk. Gates:
+  lint / unit / build / e2e all green with NO change to any existing e2e spec
+  (the M5-A encoding specs — auto-1252, UTF-16LE BOM strip, forced-UTF-8
+  U+FFFD — must pass unmodified against the worker decode path). Perf:
+  10 MB < 3 s target (< 5 s gate) and 100 MB completes + scrolls with no
+  regression vs the M5-A baseline (460 ms / 3868 ms); a 1 GB generated fixture
+  is parsed in-browser and the run (complete or crash point, with timings and
+  heap) is recorded in `tests/perf.md`. Columnar/typed-array row storage is
+  EVALUATED with measured per-row heap numbers (plain objects vs columnar at
+  the 100 MB fixture's 1.4M-row scale) plus the AG Grid display-side analysis;
+  a written verdict + recommendation lands in `tests/perf.md` and the as-built
+  notes. Full row-storage rewrite, if warranted, is scoped as follow-up work,
+  not part of B. — MET 2026-09-05 (see as-built note; the 1 GB stall point is
+  recorded as the known ceiling with a written recommendation).
 - Checkpoint C: _written when started._
 - Checkpoint D: _written when started._
 
@@ -113,3 +131,40 @@ screen readers, and documented end to end.
   existing + 5 new, perf tests skipped per base-run convention) and the perf
   gates re-run after the change: 10 MB 460 ms / 100 MB 3868 ms — no regression
   (M4-F baseline 577/3924).
+   gates re-run after the change: 10 MB 460 ms / 100 MB 3868 ms — no regression
+   (M4-F baseline 577/3924).
+- **Checkpoint B — perf pass (DONE 2026-09-05).** Decode + line splitting now
+  live in the parse worker: `fileSource.readByteChunks` yields raw 1 MiB
+  ArrayBuffers (BOM-offset start; empty-file EOF contract), the worker owns a
+  persistent streaming `StreamDecoder` per file (created at `init` from the
+  encoding label, reset with the engine on rotation) and chunk messages carry
+  **transferred** buffers + a `stream` flag — parse flushes on the final
+  chunk, tail always streams. `TailFeed` emits raw bytes; `startParse`/
+  `startTail` decode one leading 1 MiB on main solely for parser autodetect
+  (unchanged 200-line window). Same protocol serves parse, tail initial read,
+  growth polls and post-rotation re-reads. `scripts/gen-large.ts` writes in
+  chunks (a single 1 GB join hits V8's ~512 MB max string length); output
+  verified byte-identical by SHA-256 against the pre-change 10 MB fixture.
+  Perf: baseline captured pre-change (497 ms / 4269 ms); after, quiet runs
+  513 ms / 3982 ms and 480 ms / 3861 ms — no regression (high-load runs
+  881–922 / 8200–8563 ms are environmental noise, per M2/M3 pattern; all
+  numbers in `tests/perf.md` M5-B section). 1 GB re-measure (13,976,799-line
+  fixture): the worker parse is linear and no longer the bottleneck — the
+  MAIN-thread store drain stalls at ~98% after ~14 min (~100 rows/s; renderer
+  alive, in swap; grid phase never reached). A Node control probe shows the
+  bare 13.98M-row append loop takes 3.6 s (with a ~5x tail-growth slowdown),
+  so the ceiling is renderer memory exhaustion, not the drain mechanic.
+  Columnar evaluation at the 1.4M-row scale: plain objects 328 B/row vs
+  simple columnar 248 B/row (−24%, text floor 132 B/row) — a structural
+  saving that does NOT lift the ceiling, because (a) the IPC drain stays
+  object-by-object unless workers post transferred column buffers, and (b)
+  AG Grid Community's eager ClientSideRowModel adds ~260 B/row of display
+  heap (~3.5+ GB at 14M rows) no matter how entries are stored. Recommendation
+  (M6 candidate, written in `tests/perf.md`): columnar typed-array storage +
+  transferred buffers, a >1–2M-row display strategy (Enterprise
+  ServerSideRowModel / capped display / DuckDB-as-engine), optional DuckDB as
+  the record store for >1 GB files. The 1 GB probe spec is kept as a
+  KNOWN-FAILING ceiling canary gated behind `PERF_1000`.
+  Gates after B: lint clean; unit 238/238 (27 files, +streamDecoder); build
+  ok; base e2e 44 passed / 3 skipped (perf specs env-gated); M5-A encoding
+  specs unmodified and green; perf gates re-run as above.

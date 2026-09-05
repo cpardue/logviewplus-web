@@ -10,8 +10,9 @@ Intended for personal/internal use (GitHub Pages ToS prohibits commercial SaaS).
 
 ## Status
 
-**Milestone 5 in progress — checkpoint A complete (2026-09-04):** file
-encodings. Every opened file's encoding is resolved before parsing: BOMs are
+**Milestone 5 in progress — checkpoints A + B complete (2026-09-05).**
+
+Checkpoint A — file encodings. Every opened file's encoding is resolved before parsing: BOMs are
 detected and stripped (UTF-8 / UTF-16 LE / UTF-16 BE), then a leading 64 KiB
 sample auto-detects (pure ASCII → UTF-8; strict-UTF-8 validation → UTF-8;
 UTF-16 zero-parity pattern → UTF-16 LE/BE; anything else with high bytes →
@@ -19,9 +20,19 @@ Windows-1252 — the legacy ANSI case, e.g. `café`/`€` service logs). The
 resolved encoding shows as a badge in the toolbar per file, and the FilterBar
 gained an **Encoding** select (Auto / UTF-8 / UTF-16 LE / UTF-16 BE /
 Windows-1252, persisted) that overrides detection for files opened after the
-change; live tail and folder-monitor sessions honor the same rules. Remaining
-M5 checkpoints: 1 GB+ performance pass, accessibility, docs section — see
-`MILESTONE-5.md`.
+change; live tail and folder-monitor sessions honor the same rules.
+
+Checkpoint B — performance pass. Log decoding + line splitting now run in the
+parse worker over transferred 1 MiB byte chunks (no text copies cross into the
+main thread), so 10 MB / 100 MB parses are no slower than before (~0.5 s /
+~3.9–4.3 s here). The 1 GB re-measure shows the wall is not parsing: a
+plain-object row store plus the grid's full in-memory model exhaust renderer
+memory at ~98% of a 1 GB file — that stall, the columnar-storage evaluation
+(~24% per-row saving, insufficient alone) and the path to lift it (columnar
+typed-array storage + transferred buffers + a big-row-count display strategy)
+are recorded in `tests/perf.md` (M5-B section).
+
+Remaining M5 checkpoints: accessibility, docs section — see `MILESTONE-5.md`.
 
 **Milestone 4 complete (2026-09-04):** all six checkpoints done — **Watch
 folder…**: a live directory monitor (File System Access API, Chromium-only,
@@ -67,8 +78,10 @@ CSV/JSON export of the filtered rows.
 - `MILESTONE-2.md` — M2 tasks + acceptance criteria (done)
 - `MILESTONE-3.md` — M3 tasks + acceptance criteria (done)
 - `MILESTONE-4.md` — M4 power features: tasks, checkpoints A–F as-built, limitations
-- `MILESTONE-5.md` — M5 polish: encodings (A, done), perf pass (B), a11y (C), docs (D)
-- `tests/perf.md` — measured performance numbers (M1, M2 re-check, M3 closeout)
+- `MILESTONE-5.md` — M5 polish: encodings (A, done), perf pass (B, done — 1 GB
+  ceiling documented), a11y (C), docs (D)
+- `tests/perf.md` — measured performance numbers (M1, M2 re-check, M3 closeout,
+  M5-B worker-decode + 1 GB re-measure)
 
 ## Usage
 
@@ -129,10 +142,12 @@ dev machine has no system git binary, and the wire-protocol pusher in
 
 | Scenario | Gate | Measured |
 | --- | --- | --- |
-| 10 MB → parse + full grid ready | < 3 s (M2/M3 gate < 5 s) | **0.74 s** warm / 2.6 s cold (M1); 1.34–1.55 s (noisy M2 re-check); **0.66–0.68 s** (M3, 2026-09-03) |
-| 100 MB → completes, no tab crash, scrolls | completes + scrolls | **5.4 s** (M1 one-shot); 9.5–10.2 s (noisy M2 re-check); **4.4–4.8 s** (M3, 2026-09-03 — drift closed as environmental) |
+| 10 MB → parse + full grid ready | < 3 s (M2/M3 gate < 5 s) | **0.74 s** warm / 2.6 s cold (M1); 1.34–1.55 s (noisy M2 re-check); **0.66–0.68 s** (M3, 2026-09-03); **0.48–0.51 s** (M5-B, 2026-09-05, worker-side decode) |
+| 100 MB → completes, no tab crash, scrolls | completes + scrolls | **5.4 s** (M1 one-shot); 9.5–10.2 s (noisy M2 re-check); **4.4–4.8 s** (M3, 2026-09-03 — drift closed as environmental); **3.86–4.0 s** (M5-B, 2026-09-05) |
+| 1 GB → parse completes | n/a (re-measure) | **stalls at ~98% of the store drain after ~14 min** (renderer memory exhaustion; worker parse itself is linear) — ceiling documented in `tests/perf.md` §M5-B |
 
-Details, verdict on the M2 drift, and how to reproduce: `tests/perf.md`.
+Details, verdict on the M2 drift, how to reproduce, and the 1 GB analysis:
+`tests/perf.md`.
 
 ## Known limitations
 
@@ -148,9 +163,13 @@ Details, verdict on the M2 drift, and how to reproduce: `tests/perf.md`.
   profile in IndexedDB (client-side only; clearing site data clears them) —
   **Save/Load workspace…** bundles them (+ active filter, tz mode, per-file
   metadata) into a portable JSON archive for moving between profiles/machines.
-- Memory ≈ 1 GB heap at 100 MB / 1.4M rows — practical ceiling ~500 MB files
-  before columnar/typed-array storage (M5 perf pass; see `tests/perf.md` for
-  the M3 bottleneck breakdown).
+- Memory ceiling (measured, M5-B): heap ≈ 0.8 GB at 100 MB / 1.4M rows; a
+  1 GB file stalls at ~98% of the store drain (~14 min, renderer memory
+  exhaustion — decode/parse in the worker is no longer the bottleneck).
+  Practical: ~500 MB files are heavy but workable. Lifting the ceiling needs
+  columnar/typed-array row storage + transferred buffers + a big-row-count
+  display strategy — evaluated in `tests/perf.md` (M5-B section) and scoped as
+  follow-up work, not part of M5.
 - Live tail-following and folder watching are Chromium-only (File System
   Access API); other browsers show a hint and everything else works. Same-size
   file rewrites between polls are undetectable (inherent to size polling, same

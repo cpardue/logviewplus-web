@@ -1,41 +1,36 @@
-import type { EncodingResolution } from './encoding'
-
 export const DEFAULT_CHUNK = 1024 * 1024 // 1 MiB
 
-export interface TextChunk {
-  text: string
+export interface ByteChunk {
+  buf: ArrayBuffer
   isLast: boolean
 }
 
-const UTF8_ONLY: EncodingResolution = { label: 'utf-8', bomLength: 0 }
-
 /**
- * Stream a Blob/File as text in fixed-size slices, decoded with
- * `resolution.label` (see `src/lib/encoding.ts`; default plain UTF-8).
- * `TextDecoder` runs in streaming mode so multi-byte characters (and
- * UTF-16's two-byte units) split across chunk boundaries decode correctly.
- * Reading starts at `resolution.bomLength` so a detected BOM is skipped.
- * The last yielded chunk may be an empty string (decoder flush) — callers
- * can ignore empty text.
+ * Stream a Blob/File as raw byte slices from `bomLength` onward (see
+ * `src/lib/encoding.ts` — a resolved BOM is skipped here, so the worker never
+ * sees it). Slicing and reading stay on the main thread because `Blob` is a
+ * main-thread API; the caller then TRANSFERS each buffer to the parse worker
+ * (`postMessage(msg, [buf])`), where decoding happens (M5-B) — no string
+ * structured-clone crosses the boundary. The final chunk carries
+ * `isLast: true`; an empty or BOM-only blob yields a single empty final chunk
+ * so callers can still signal end-of-file (init + finish).
  */
-export async function* readTextChunks(
+export async function* readByteChunks(
   blob: Blob,
   chunkSize: number = DEFAULT_CHUNK,
-  resolution: EncodingResolution = UTF8_ONLY,
-): AsyncGenerator<TextChunk> {
-  const start = Math.min(resolution.bomLength, blob.size)
+  bomLength = 0,
+): AsyncGenerator<ByteChunk> {
+  const start = Math.min(bomLength, blob.size)
   if (blob.size <= start) {
-    yield { text: '', isLast: true }
+    yield { buf: new ArrayBuffer(0), isLast: true }
     return
   }
-  const decoder = new TextDecoder(resolution.label, { fatal: false })
   let offset = start
   while (offset < blob.size) {
     const end = Math.min(offset + chunkSize, blob.size)
     const buf = await blob.slice(offset, end).arrayBuffer()
     offset = end
-    const isLast = offset >= blob.size
-    yield { text: decoder.decode(new Uint8Array(buf), { stream: !isLast }), isLast }
+    yield { buf, isLast: offset >= blob.size }
   }
 }
 

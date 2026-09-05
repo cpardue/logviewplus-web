@@ -1,4 +1,4 @@
-import { DEFAULT_CHUNK, readTextChunks } from './fileSource'
+import { DEFAULT_CHUNK, readByteChunks } from './fileSource'
 import { resolveFromBlob, resolveFromSample, SAMPLE_BYTES, type EncodingChoice, type EncodingResolution } from './encoding'
 import { detectFormat } from '../parsers/detect'
 import { DirFeed, type DirEntry, type DirSource } from './dirWatch'
@@ -26,8 +26,9 @@ export interface ParseOptions {
 }
 
 /**
- * Orchestrate one file: parser autodetect from the first chunk, stream 1 MiB
- * text chunks into a parse worker, route results back via callbacks.
+ * Orchestrate one file: parser autodetect from the first chunk, transfer
+ * 1 MiB byte chunks into a parse worker (decode + line splitting happen in
+ * the worker — M5-B), route results back via callbacks.
  */
 export function startParse(file: File, callbacks: ParseCallbacks, opts: ParseOptions = {}): ParseSession {
   const worker = new Worker(new URL('../workers/parser.worker.ts', import.meta.url), {
@@ -65,14 +66,21 @@ export function startParse(file: File, callbacks: ParseCallbacks, opts: ParseOpt
     const resolution = await resolveFromBlob(file, opts.encoding ?? 'auto')
     if (closed) return
     callbacks.onEncoding?.(resolution)
-    for await (const { text } of readTextChunks(file, DEFAULT_CHUNK, resolution)) {
+    // The leading chunk is decoded on main ONCE for parser autodetect (the
+    // same first-200-lines window as before); the worker re-decodes every
+    // byte itself from the transferred buffers.
+    const probe = new TextDecoder(resolution.label, { fatal: false })
+    for await (const { buf, isLast } of readByteChunks(file, DEFAULT_CHUNK, resolution.bomLength)) {
       if (closed) return
       if (!inited) {
-        const spec: ParserSpec = detectFormat(text.split('\n').slice(0, 200))
-        worker.postMessage({ type: 'init', spec, fileName: file.name, tzMode: opts.tzMode })
+        const sampleText = probe.decode(new Uint8Array(buf), { stream: true })
+        const spec: ParserSpec = detectFormat(sampleText.split('\n').slice(0, 200))
+        worker.postMessage({ type: 'init', spec, fileName: file.name, tzMode: opts.tzMode, encoding: resolution.label })
         inited = true
       }
-      worker.postMessage({ type: 'chunk', text })
+      // `stream: false` on the final chunk flushes any trailing partial
+      // decode sequence (matches the old main-thread decoder semantics).
+      worker.postMessage({ type: 'chunk', buf, stream: !isLast }, [buf])
     }
     if (!closed && inited) worker.postMessage({ type: 'finish' })
   })().catch(err => {
@@ -114,9 +122,10 @@ export interface TailOptions extends ParseOptions {
  * Tail a live file: read the current content in 1 MiB chunks through one
  * persistent parse worker (spec autodetected from the first chunk, NO
  * `finish` — the engine stays open so line/seq counters keep running), then
- * poll for growth. Growth is decoded by one streaming decoder for the file's
- * resolved encoding (leading sample; user override wins) across polls and fed
- * as chunks. On rotation (file shrank) the worker engine is
+ * poll for growth. Growth bytes are transferred to the worker, which decodes
+ * them with ONE persistent streaming decoder (always `stream: true` — the
+ * file may keep growing) under the resolved encoding (leading sample; user
+ * override wins). On rotation (file shrank) the worker engine AND decoder are
  * reset (epoch bump) and the file re-read from byte 0. Returns a
  * {@link ParseSession}; `close()` stops polling and terminates the worker.
  */
@@ -132,6 +141,8 @@ export function startTail(source: TailSource, callbacks: TailCallbacks, opts: Ta
   let resetAck: (() => void) | null = null
   /** Created once the leading sample resolves the file's encoding. */
   let feed: TailFeed | null = null
+  /** Resolved decoder label for init (set together with `feed`). */
+  let encLabel: string | null = null
   let timer: number | null = null
   const pollMs = opts.pollMs ?? 1000
 
@@ -201,14 +212,21 @@ export function startTail(source: TailSource, callbacks: TailCallbacks, opts: Ta
             await handleRotation(f)
             // Loop again: re-read the (new) content from byte 0.
             break
-          case 'text': {
-            const text = step.text
+          case 'bytes': {
+            const { buf } = step
             if (!inited) {
-              const spec: ParserSpec = detectFormat(text.split('\n').slice(0, 200))
-              worker.postMessage({ type: 'init', spec, fileName: source.name, tzMode: opts.tzMode })
+              // The leading chunk is decoded on main ONCE for parser
+              // autodetect (same first-200-lines window as before); the
+              // worker re-decodes every byte from the transferred buffers.
+              const sampleText = new TextDecoder(encLabel ?? 'utf-8', { fatal: false }).decode(
+                new Uint8Array(buf),
+                { stream: true },
+              )
+              const spec: ParserSpec = detectFormat(sampleText.split('\n').slice(0, 200))
+              worker.postMessage({ type: 'init', spec, fileName: source.name, tzMode: opts.tzMode, encoding: encLabel ?? 'utf-8' })
               inited = true
             }
-            if (text !== '') worker.postMessage({ type: 'chunk', text })
+            if (buf.byteLength > 0) worker.postMessage({ type: 'chunk', buf, stream: true }, [buf])
             break
           }
         }
@@ -244,6 +262,7 @@ export function startTail(source: TailSource, callbacks: TailCallbacks, opts: Ta
     const resolution = resolveFromSample(sample, opts.encoding ?? 'auto')
     callbacks.onEncoding?.(resolution)
     feed = new TailFeed(source, resolution)
+    encLabel = resolution.label
     void pump()
     timer = window.setInterval(() => void pump(), pollMs)
   })().catch(err => {

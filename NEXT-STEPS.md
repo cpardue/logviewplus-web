@@ -4,15 +4,18 @@
 > `MILESTONE-1.md`, `README.md`, `tests/perf.md`, `MILESTONE-5.md`, and the
 > history file at `../history/logviewplus-web.md` (one level up, outside the
 > repo).
-> Last updated: 2026-09-04 — **M4 COMPLETE** (checkpoints A–F: directory
-> monitor; rules & row coloring; highlights/bookmarks/notes; workspace
-> archive save/share; local `.sqlite` open; webhook notifications — see
-> `MILESTONE-4.md`) + **M5 CHECKPOINT A COMPLETE**: file encodings — BOM
-> detect + strip (UTF-8/UTF-16 LE/BE), 64 KiB sample auto-detect (ASCII →
-> UTF-8; strict-UTF-8 → UTF-8; UTF-16 zero-parity → LE/BE; else
-> Windows-1252), persisted Encoding select override (applies to files opened
-> afterwards) + per-file resolved-encoding toolbar badge; tail/monitor honor
-> the same rules — see `MILESTONE-5.md`. Next: M5-B perf pass (§0).
+> Last updated: 2026-09-05 — **M4 COMPLETE** (checkpoints A–F, see
+> `MILESTONE-4.md`) + **M5 CHECKPOINT A COMPLETE**: file encodings (BOM
+> detect/strip, 64 KiB sample auto-detect → UTF-8 / UTF-16 LE/BE /
+> Windows-1252, persisted override select, per-file toolbar badge) +
+> **M5 CHECKPOINT B COMPLETE**: worker-side decode — the parse worker now
+> owns decoding + line splitting via transferred 1 MiB ArrayBuffers
+> (`src/lib/streamDecoder.ts`, persistent per file); 10/100 MB gates
+> no-regression; 1 GB re-measured: the store drain stalls at ~98% (renderer
+> memory exhaustion — documented as the known ceiling), columnar/typed-array
+> row storage evaluated (−24% B/row, does NOT lift the AG Grid display-side
+> ceiling) with a written M6 recommendation — see `MILESTONE-5.md` +
+> `tests/perf.md`. Next: M5-C accessibility (§0).
 
 ## 0. Where we are (TL;DR)
 
@@ -219,11 +222,46 @@
   regression (M4-F 577/3924). Limitations in `MILESTONE-5.md` (64 KiB sample;
   override affects files opened afterwards only; 1252 = the single ANSI
   fallback).
-- Next up: **M5-B — 1 GB+ perf pass** (move decode + `split('\n')` out of the
-  main thread into the parse worker via transferred ArrayBuffers; evaluate
-  columnar/typed-array entry storage — the ~1 GB heap at 1.4M rows is the real
-  ceiling, not parse speed; re-measure in `tests/perf.md`). Then M5-C a11y,
-  M5-D docs section. See `MILESTONE-5.md` for the full checkpoint plan.
+- **M5 checkpoint B COMPLETE — 2026-09-05**: the perf pass. Decode + line
+  splitting moved OUT of the main thread into the parse worker:
+  `fileSource.readByteChunks` yields raw 1 MiB ArrayBuffers (start past a
+  resolved BOM; one empty final chunk = EOF contract); the worker owns a
+  persistent streaming `StreamDecoder` per file (`src/lib/streamDecoder.ts`,
+  DOM-free, unit-tested) created at `init` from the encoding label and reset
+  with the engine on rotation; chunk messages carry TRANSFERRED buffers + a
+  `stream` flag (parse flushes on the final chunk, tail always streams).
+  `TailFeed` emits raw bytes; `startParse`/`startTail` still decode one
+  leading 1 MiB on main solely for parser autodetect (unchanged 200-line
+  window). Same protocol serves parse / tail initial read / growth polls /
+  post-rotation re-reads. M5-A's encoding specs pass UNMODIFIED against the
+  new path. `scripts/gen-large.ts` writes in chunks now (a single 1 GB join
+  hits V8's ~512 MB max string length); output verified byte-identical by
+  SHA-256 regenerating the 10 MB fixture; the 1 GB fixture is
+  1000.00 MB / 13,976,799 lines (generated/ — never committed). Perf:
+  baseline captured PRE-change (497 ms / 4269 ms); quiet post-runs 513/3982 +
+  480/3861 — **no regression** (two later runs at ~65% background CPU:
+  881–922 / 8200–8563 — environmental noise per the M2/M3 pattern; all numbers
+  + load notes in `tests/perf.md` §M5-B). 1 GB re-measure (two runs, 420 s +
+  840 s polls): the worker parse is linear and no longer the bottleneck — the
+  MAIN-thread store drain stalls at ~98% (~13.7M/13.98M rows, ~100 rows/s
+  late-run; renderer alive in swap, grid phase never reached). Node control
+  probe: the bare 13.98M-row `push(5k)` loop is 3.6 s total (rss 2.8 GB, ~5x
+  tail-growth slowdown) → the ceiling is renderer memory exhaustion, not the
+  drain mechanic. Columnar evaluation at the 1.4M-row scale: plain objects
+  328 B/row vs simple columnar 248 B/row (−24%; text floor 132 B) — a
+  structural saving that does NOT lift the ceiling, because the IPC drain
+  stays object-by-object unless workers post transferred column buffers, AND
+  AG Grid Community's eager ClientSideRowModel adds ~260 B/row of display
+  heap (~3.5+ GB at 14M rows). Written M6 recommendation in `tests/perf.md`:
+  columnar typed-array store + transferred buffers; a >1–2M-row display
+  strategy (Enterprise ServerSideRowModel / capped display / DuckDB-as-engine);
+  optional DuckDB as the record store for >1 GB files. New `PERF_1000`-gated
+  ceiling-probe spec = KNOWN-FAILING canary for that work (base suite stays
+  green: 44 passed / 3 skipped).
+- Next up: **M5-C — accessibility** (ARIA roles/labels on toolbar + bars +
+  tabs, keyboard operability + visible focus, aria-live status announcements,
+  contrast pass, AG Grid a11y config; E2E smoke). Then M5-D docs section. See
+  `MILESTONE-5.md` for the full checkpoint plan.
 
 ## 1. ~~Immediate task: enable Pages, verify live site~~ — DONE 2026-09-02
 
@@ -290,7 +328,7 @@ Steps actually taken (kept for reference):
 
 ```
 npm run lint
-npm test                      # 235 unit tests (26 files), ~1.5 s
+npm test                      # 238 unit tests (27 files), ~1.5 s
 npm run build                 # tsc -b && vite build → dist/
 npm run gen:logs -- 10        # deterministic fixtures (seeded; 10MB=139769 lines, 100MB=1397688)
 npm run gen:sqlite            # deterministic .sqlite fixture (committed at tests/fixtures/sqlite/)
@@ -298,6 +336,8 @@ npm run gen:encodings         # deterministic encoding fixtures (win1252/utf16le
 npm run build                 # REQUIRED before e2e (playwright webServer serves dist via vite preview)
 npm run test:e2e              # 44 tests: app/merge/zip/paste/saved-filters/export/report/tail/dir/rules/highlights/workspace/sqlite/webhook/encoding chains + (PERF-gated) perf
 $env:PERF='1'; $env:PERF_100='1'; npx playwright test   # 46 incl. both perf gates (~15 s on a quiet pass)
+# PERF_1000 1 GB ceiling probe = KNOWN-FAILING canary (M5-B: store drain stalls at ~98%;
+# tests/perf.md §M5-B + MILESTONE-5 as-built). Base suite stays green without it.
 ```
 
 - Chromium is already installed (`npx playwright install chromium` if a fresh
@@ -388,7 +428,15 @@ decoder label + BOM offset in `fileSource.ts`/`tail.ts`, the persisted `encoding
 setting + `FileState.encoding` in `logStore.ts`, the FilterBar Encoding select +
 Toolbar badge, `scripts/gen-encoding-fixtures.mjs` and
 `tests/{unit/encoding.test.ts, e2e/encoding.spec.ts}` + fixtures
-`tests/fixtures/logs/{win1252,utf16le,utf8-mb}.log`
+`tests/fixtures/logs/{win1252,utf16le,utf8-mb}.log`;
+M5-B moved decode into the worker: `src/lib/streamDecoder.ts` (DOM-free streaming
+decoder core — new unit file), raw-byte `fileSource.readByteChunks`, a
+worker-owned persistent decoder (created at `init` from the encoding label,
+reset on rotation) fed by transferred chunks + `stream` flag, raw-byte
+`TailFeed` emission, `scripts/gen-large.ts` chunked 1 GB writes (output
+SHA-256-verified byte-identical to the pre-change generator), and a
+`PERF_1000`-gated 1 GB ceiling probe in app.spec.ts
+(known-failing canary — `tests/perf.md` §M5-B)
 
 ```
 src/parsers/        pure parser core: types.ts, levels.ts, timestamps.ts,
@@ -397,9 +445,11 @@ src/parsers/        pure parser core: types.ts, levels.ts, timestamps.ts,
 src/workers/        parser-engine.ts (pure streaming engine — unit-tested directly;
                     partial-line state across feed(); flush semantics: remainder
                     emitted at end of a feed that had no limit-flush, or on finish)
-                    parser.worker.ts (thin self.onmessage shell)
-src/lib/            fileSource.ts (1 MiB slice + streaming TextDecoder under the
-                    resolved encoding label, BOM offset), encoding.ts (BOM detect,
+                    parser.worker.ts (owns per-file StreamDecoder decode of
+                    transferred chunks; posts LogEntry[] + progress)
+src/lib/            fileSource.ts (raw 1 MiB ArrayBuffer slices — readByteChunks —
+                    BOM offset; decode now in the worker), streamDecoder.ts,
+                    encoding.ts (BOM detect,
                     strict-UTF-8 scan, auto-detect, resolution),
                     pipeline.ts (worker orchestration + template autodetect from
                     first 200 sample lines + encoding resolution before first chunk),
@@ -412,12 +462,14 @@ src/components/     LogGrid.tsx (AG Grid v32, exposes window.__gridApi),
                     level chips)
 src/App.tsx         layout, dropzone+picker, rows useMemo (ready-gated!),
                     exposes window.__appCounts for E2E
-scripts/            gen-large.ts (seeded generator; Node 24 native TS),
+scripts/            gen-large.ts (seeded generator; chunked writes for 1 GB —
+                    V8 ~512 MB max string length; Node 24 native TS),
                     git-push.mjs (wire — currently 401), git-push-api.mjs (WORKING)
 tests/unit/         36 tests: specifiers, pattern-parser, parser-engine (chunk
                     boundaries/batches/CRLF/trailing line), filesource (UTF-8 splits),
                     filters
-tests/e2e/app.spec.ts  fixture chain (40→7→1) + PERF-gated 10/100 MB perf tests
+tests/e2e/app.spec.ts  fixture chain (40→7→1) + PERF-gated 10/100 MB perf tests +
+                    PERF_1000-gated 1 GB ceiling probe (known-failing canary)
 tests/fixtures/logs/   mixed-levels.log (40 lines: 7 WARN, 5 ERROR, 2 FATAL, 1 raw),
                     gc.log, iis-u_ex.log (W3C — for M2), app.json (JSON lines — M2)
 tests/perf.md       measured numbers + how to reproduce + known bottlenecks
